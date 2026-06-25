@@ -589,3 +589,13 @@ public structure CustomMulT where
 @[default_instance]
 public instance instHMulNatCustom : HMul Nat CustomMulT CustomMulT where
   hMul a b := { x := a + b.x }
+
+/-! Setup for #14147: wrapping `inferInstanceAs` for a non-exposed type. The wrapper aux def's body
+(`Nat.zero : NotExposedTy`) is not well-typed without `NotExposedTy`'s body, so it must be kept out
+of the public scope while still exporting its signature; cross-module checks are in
+`Module.Imported`. -/
+
+public def NotExposedTy := Nat
+
+public noncomputable instance instInhabitedNotExposedTy : Inhabited NotExposedTy :=
+  inferInstanceAs (Inhabited Nat)

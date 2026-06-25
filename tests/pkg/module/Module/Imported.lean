@@ -214,3 +214,22 @@ public meta def metaUsingNonMeta : Nat :=
 
 -- #11672
 example : instA = { instA with b := 0 } := rfl
+
+/-! #14147: the `inferInstanceAs` wrapper aux def must be exported as a signature-only stub (body
+`<not imported>`), and the exposed instance must reference it by its public name, so the instance is
+well-typed here. A regression would either drop the aux from the public scope entirely (making this
+an `Unknown constant`) or expose its publicly ill-typed body. -/
+
+/--
+info: @[instance_reducible, expose] def instInhabitedNotExposedTy : Inhabited NotExposedTy :=
+{ default := instInhabitedNotExposedTy._aux_1 }
+-/
+#guard_msgs in
+#print instInhabitedNotExposedTy
+
+/--
+info: def instInhabitedNotExposedTy._aux_1 : NotExposedTy :=
+<not imported>
+-/
+#guard_msgs in
+#print instInhabitedNotExposedTy._aux_1
