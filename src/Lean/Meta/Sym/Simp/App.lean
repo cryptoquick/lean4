@@ -452,10 +452,18 @@ Dispatches to the appropriate strategy based on the function's `CongrInfo`.
 public def simpAppArgs (e : Expr) : SimpM Result := do
   let f := e.getAppFn
   match (← getCongrInfo f) with
-  | .none => return .rfl
-  | .fixedPrefix prefixSize suffixSize => simpFixedPrefix e prefixSize suffixSize
-  | .interlaced rewritable => simpInterlaced e rewritable
-  | .congrTheorem thm => simpUsingCongrThm e thm
+  | .none =>
+    trace[Meta.debug] m!"A"
+    return .rfl
+  | .fixedPrefix prefixSize suffixSize =>
+    trace[Meta.debug] m!"B"
+    simpFixedPrefix e prefixSize suffixSize
+  | .interlaced rewritable =>
+    trace[Meta.debug] m!"C"
+    simpInterlaced e rewritable
+  | .congrTheorem thm =>
+    trace[Meta.debug] m!"D"
+    simpUsingCongrThm e thm
 
 /--
 Simplifies arguments in a specified range `[start, stop)` of a function application.
