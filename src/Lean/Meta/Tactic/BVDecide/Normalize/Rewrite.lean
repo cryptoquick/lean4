@@ -7,6 +7,9 @@ module
 
 prelude
 public import Lean.Meta.Tactic.BVDecide.Normalize.Basic
+import Lean.Meta.Tactic.BVDecide.Normalize.Simproc
+import Lean.Meta.Sym.Simp.Rewrite
+import Lean.Meta.Sym.Simp.EvalGround
 
 /-!
 This module contains the implementation of the rewriting pass in the fixpoint pipeline, applying
@@ -23,34 +26,19 @@ public def rewriteRulesPass : Pass where
   name := `rewriteRules
   run' := do
     let bvThms ← bvNormalizeExt.getTheorems
-    let bvSimprocs ← bvNormalizeSimprocExt.getSimprocs
-    let sevalThms ← getSEvalTheorems
-    let sevalSimprocs ← Simp.getSEvalSimprocs
     let cfg ← PreProcessM.getConfig
-
-    let simpCtx ← Simp.mkContext
-      (config := {
-        failIfUnchanged := false,
-        zetaDelta := true,
-        implicitDefEqProofs := false, -- leanprover/lean4/pull/7509
-        maxSteps := cfg.maxSteps,
-        instances := true
-      })
-      (simpTheorems := #[bvThms, sevalThms])
-      (congrTheorems := (← getSimpCongrTheorems))
+    let config := {
+      maxSteps := cfg.maxSteps
+    }
+    let simpMethods := {
+      post := Sym.Simp.evalGround >> Normalize.rewriteSimproc >> bvThms.rewrite
+    }
 
     let goal ← PreProcessM.getGoal
     goal.withContext do
       PreProcessM.mapHyps fun hyp => do
-        let (res, _) ← simp hyp.type simpCtx (simprocs := #[bvSimprocs, sevalSimprocs])
-        let some (value, type) ← applySimpResult goal hyp.value hyp.type res false | unreachable!
-        -- TODO: fixup
-        let type ← Sym.shareCommon type
-        return {
-          name := hyp.name
-          type := type
-          value := value
-        }
+        let res ← Sym.simp hyp.type simpMethods config
+        hyp.applySimpResult res
 
 end Normalize
 end Lean.Meta.Tactic.BVDecide
