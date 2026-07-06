@@ -11,7 +11,9 @@ public import Std.Tactic.BVDecide.Syntax
 public import Lean.Meta.Sym.ExprPtr
 public import Lean.Meta.Sym.SymM
 public import Lean.Meta.Sym.Simp.SimpM
+public import Lean.Meta.Sym.AlphaShareBuilder
 import Lean.Meta.Sym.InferType
+import Lean.Meta.Sym.InstantiateMVarsS
 
 public section
 
@@ -202,7 +204,7 @@ def collectHypsFromGoal : PreProcessM Unit := do
     let hyps ← (← getPropHyps).mapM fun fvarId => do
       return {
         name := ← fvarId.getUserName
-        type := ← instantiateMVars (← fvarId.getType)
+        type := ← Sym.instantiateMVarsS (← fvarId.getType)
         value := mkFVar fvarId
       }
     modify fun s => { s with hypotheses := hyps }
@@ -210,11 +212,16 @@ def collectHypsFromGoal : PreProcessM Unit := do
 @[inline]
 def pushHyp (hyp : Hyp) : PreProcessM Unit := do
   trace[Meta.Tactic.bv] m!"Learned hypothesis: {hyp.type}"
+  if (← Sym.Internal.MonadShareCommon.isDebugEnabled) then
+    Sym.Internal.Sym.assertShared hyp.type
   modify fun s => { s with hypotheses := s.hypotheses.push hyp }
 
 @[inline]
 def addHyps (hyps : Array Hyp) : PreProcessM Unit := do
-  hyps.forM fun hyp => do trace[Meta.Tactic.bv] m!"Learned hypothesis: {hyp.type}"
+  hyps.forM fun hyp => do
+    trace[Meta.Tactic.bv] m!"Learned hypothesis: {hyp.type}"
+    if (← Sym.Internal.MonadShareCommon.isDebugEnabled) then
+      Sym.Internal.Sym.assertShared hyp.type
   modify fun s => { s with hypotheses := s.hypotheses ++ hyps }
 
 @[inline]
@@ -242,7 +249,8 @@ def flatMapHyps [Monad m] [MonadTrace m] [MonadOptions m] [AddMessageContext m] 
 
 @[inline]
 def mapIdxHyps [Monad m] [MonadLiftT PreProcessM m] [MonadError m] [MonadMCtx m] [MonadTrace m]
-    [MonadOptions m] [AddMessageContext m] (f : Nat → Hyp → m Hyp) : m Bool := do
+    [MonadOptions m] [AddMessageContext m] [Sym.Internal.MonadShareCommon m]
+    (f : Nat → Hyp → m Hyp) : m Bool := do
   let hyps ← getHyps
   let mut newHyps := Array.emptyWithCapacity hyps.size
   for h : idx in 0...hyps.size do
@@ -254,6 +262,8 @@ def mapIdxHyps [Monad m] [MonadLiftT PreProcessM m] [MonadError m] [MonadMCtx m]
     else
       if hyp != newHyp then
         trace[Meta.Tactic.bv] m!"{hyp.type}  ==>  {newHyp.type}"
+        if (← Sym.Internal.MonadShareCommon.isDebugEnabled) then
+          Sym.Internal.MonadShareCommon.assertShared newHyp.type
         setDidChange
       newHyps := newHyps.push newHyp
   modify (m := PreProcessM) fun s => { s with hypotheses := newHyps }
@@ -261,7 +271,8 @@ def mapIdxHyps [Monad m] [MonadLiftT PreProcessM m] [MonadError m] [MonadMCtx m]
 
 @[inline]
 def mapHyps [Monad m] [MonadLiftT PreProcessM m] [MonadError m] [MonadMCtx m] [MonadTrace m]
-    [MonadOptions m] [AddMessageContext m] (f : Hyp → m Hyp) : m Bool := do
+    [MonadOptions m] [AddMessageContext m] [Sym.Internal.MonadShareCommon m] (f : Hyp → m Hyp) :
+    m Bool := do
   mapIdxHyps (fun _ hyp => f hyp)
 
 @[inline]

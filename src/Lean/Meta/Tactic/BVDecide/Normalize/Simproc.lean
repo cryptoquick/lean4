@@ -10,6 +10,8 @@ public import Std.Tactic.BVDecide.Normalize
 public import Lean.Meta.Tactic.BVDecide.Attr
 import Init.Omega
 public import Lean.Meta.Sym.Simp.SimpM
+import Lean.Meta.Sym.LitValues
+public import Lean.Meta.Sym.DSimp.DSimpM
 
 section
 
@@ -1240,6 +1242,13 @@ public def rewriteSimproc : Sym.Simp.Simproc := fun e => do
     match_expr α with
     | Bool => boolEqToBeq lhs rhs
     | _ => return .rfl
+  | _ => return .rfl
+
+public def rewriteDsimproc : Sym.DSimp.DSimproc := fun e => do
+  match_expr e with
+  | OfNat.ofNat _ _ _ =>
+    let some ⟨_, bv⟩ := Sym.getBitVecValue? e | return .rfl
+    return .step <| ← Sym.share <| toExpr bv
   | _ => return .rfl
 
 end Normalize

@@ -59,6 +59,8 @@ public def reflectBV (g : MVarId) : M ReflectionResult := g.withContext do
   let mut unusedHypotheses := {}
   for hyp in ← M.getHyps do
     checkSystem "bv_decide"
+    if (← Sym.Internal.MonadShareCommon.isDebugEnabled) then
+      Sym.Internal.Sym.assertShared hyp.type
     if let (some reflected, lemmas) ← (SatAtBVLogical.of hyp).run then
       sats := (sats ++ lemmas).push reflected
     -- TODO

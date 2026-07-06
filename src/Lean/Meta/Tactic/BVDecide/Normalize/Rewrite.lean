@@ -10,6 +10,7 @@ public import Lean.Meta.Tactic.BVDecide.Normalize.Basic
 import Lean.Meta.Tactic.BVDecide.Normalize.Simproc
 import Lean.Meta.Sym.Simp.Rewrite
 import Lean.Meta.Sym.Simp.EvalGround
+import Lean.Meta.Sym.DSimp
 
 /-!
 This module contains the implementation of the rewriting pass in the fixpoint pipeline, applying
@@ -30,6 +31,9 @@ public def rewriteRulesPass : Pass where
     let config := {
       maxSteps := cfg.maxSteps
     }
+    let dsimpMethods := {
+      post := Sym.DSimp.evalGround >> rewriteDsimproc
+    }
     let simpMethods := {
       post := Sym.Simp.evalGround >> Normalize.rewriteSimproc >> bvThms.rewrite
     }
@@ -37,7 +41,8 @@ public def rewriteRulesPass : Pass where
     let goal ← PreProcessM.getGoal
     goal.withContext do
       PreProcessM.mapHyps fun hyp => do
-        let res ← Sym.simp hyp.type simpMethods config
+        let type ← Sym.dsimp hyp.type dsimpMethods { config with }
+        let res ← Sym.simp type simpMethods config
         hyp.applySimpResult res
 
 end Normalize

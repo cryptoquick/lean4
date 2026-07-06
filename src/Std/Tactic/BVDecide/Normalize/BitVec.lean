@@ -59,8 +59,6 @@ theorem BitVec.sle_eq_ult (x y : BitVec w) :
     x.sle y = !((!x.getLsbD (w - 1) == y.getLsbD (w - 1)) ^^ y.ult x) := by
   rw [BitVec.sle_eq_not_slt, BitVec.slt_eq_ult, Bool.beq_comm]
 
-attribute [bv_normalize] BitVec.ofNat_eq_ofNat
-
 @[bv_normalize]
 theorem BitVec.ofNatLT_reduce (n : Nat) (h) : BitVec.ofNatLT n h = BitVec.ofNat w n := by
   simp [BitVec.ofNatLT, BitVec.ofNat, Fin.ofNat, Nat.mod_eq_of_lt h]
