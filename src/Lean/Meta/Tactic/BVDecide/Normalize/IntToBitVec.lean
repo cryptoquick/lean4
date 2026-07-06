@@ -7,6 +7,9 @@ module
 
 prelude
 public import Lean.Meta.Tactic.BVDecide.Normalize.Basic
+import Lean.Meta.Sym.Simp.Rewrite
+import Lean.Meta.Sym.InstantiateMVarsS
+import Lean.Meta.Sym.LitValues
 
 /-!
 This module contains the implementation of the pre processing pass for reducing `UIntX`/`IntX` to
@@ -50,47 +53,22 @@ private def addSizeHyp (f : FVarId) : M Unit := do
 
 end M
 
-public def intToBitVecPass : Pass where
-  name := `intToBitVec
-  run' := do
-    let goal ← PreProcessM.getGoal
-    goal.withContext do
-      let intToBvThms ← metaIntToBitVecExt.getTheorems
-      let cfg ← PreProcessM.getConfig
-      let simpCtx ← Simp.mkContext
-        (config := {
-          failIfUnchanged := false,
-          zetaDelta := true,
-          implicitDefEqProofs := false, -- leanprover/lean4/pull/7509
-          maxSteps := cfg.maxSteps,
-          instances := true
-        })
-        (simpTheorems := #[intToBvThms])
-        (congrTheorems := (← getSimpCongrTheorems))
-
-      let numBitsEq? ← findNumBitsEq (← PreProcessM.getGoal)
-      let discharge? :=
-        if let some (width, proof) := numBitsEq? then
-          some <| fun prop => do
-            let prop ← instantiateMVars prop
-            let_expr Eq _ lhs rhs := prop | return none
-            unless lhs.isConstOf ``System.Platform.numBits do return none
-            let some val ← getNatValue? rhs | return none
-            unless width == val do return none
-            return some proof
-        else
-          none
-
-      PreProcessM.mapHyps fun hyp => do
-        let (res, _) ← simp hyp.type simpCtx (discharge? := discharge?)
-        let some (value, type) ← applySimpResult goal hyp.value hyp.type res false | unreachable!
-        -- TODO: fixup
-        let type ← Sym.shareCommon type
-        return {
-          name := hyp.name
-          type := type
-          value := value
-        }
+public def addIntToBitVecLemmas (goal : MVarId) (methods : Sym.Simp.Methods) :
+    Sym.SymM Sym.Simp.Methods := do
+  let intToBvThms ← symIntToBitVecExt.getTheorems
+  let numBitsEq? ← findNumBitsEq goal
+  let discharge : Sym.Simp.Discharger :=
+    if let some (width, proof) := numBitsEq? then
+      fun prop => do
+        let prop ← Sym.instantiateMVarsS prop
+        let_expr Eq _ lhs rhs := prop | return .failed
+        unless lhs.isConstOf ``System.Platform.numBits do return .failed
+        let some val := Sym.getNatValue? rhs | return .failed
+        unless width == val do return .failed
+        return .solved proof
+    else
+      Sym.Simp.dischargeNone
+  return { methods with pre := methods.pre >> intToBvThms.rewrite (d := discharge) }
 where
   /--
   Builds an expression of type: `System.Platform.numBits = const` from the hypotheses in the context
@@ -109,6 +87,21 @@ where
             return some (val, mkApp4 (mkConst ``Eq.symm [1]) eqTyp lhs rhs (mkFVar hyp))
         | _ => continue
       return none
+
+public def intToBitVecPass : Pass where
+  name := `intToBitVec
+  run' := do
+    let cfg ← PreProcessM.getConfig
+    let goal ← PreProcessM.getGoal
+
+    let config := {
+      maxSteps := cfg.maxSteps
+    }
+    let methods ← addIntToBitVecLemmas goal {}
+    goal.withContext do
+      PreProcessM.mapHyps fun hyp => do
+        let res ← Sym.simp hyp.type methods config
+        hyp.applySimpResult res
 
 end Normalize
 end Lean.Meta.Tactic.BVDecide

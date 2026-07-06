@@ -11,6 +11,7 @@ import Lean.Meta.Tactic.BVDecide.Normalize.ApplyControlFlow
 import Lean.Meta.Sym.Simp.Theorems
 import Lean.Meta.Sym.Simp.Rewrite
 import Lean.Meta.Sym.Util
+import Lean.Meta.Tactic.BVDecide.Normalize.IntToBitVec
 
 /-!
 This module contains the implementation of the pre processing pass for handling enum inductive
@@ -444,12 +445,9 @@ public partial def enumsPass : Pass where
       if cfg.structures then
         methods ← addStructureSimpLemmas methods
 
-      /-
-      TODO
       -- same for fixed integers
       if cfg.fixedInt then
-        relevantLemmas := relevantLemmas.push (← metaIntToBitVecExt.getTheorems)
-      -/
+        methods ← addIntToBitVecLemmas goal methods
 
       let cfg ← PreProcessM.getConfig
       let config := {
