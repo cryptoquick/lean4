@@ -10,6 +10,7 @@ import Init.Sym.Lemmas
 import Lean.Meta.Sym.LitValues
 import Lean.Meta.StringLitProof
 import Lean.Meta.Offset
+import Lean.Meta.CtorRecognizer
 namespace Lean.Meta.Sym.Simp
 
 /-!
@@ -449,6 +450,7 @@ def evalEq (α : Expr) (a b : Expr) : SimpM Result :=
     let u ← getLevel α
     return .step e (mkApp2 (mkConst ``eq_self [u]) α a) (done := true)
   else match_expr α with
+  | Bool => evalBinPred getBoolValue? (mkConst ``Bool.eq_eq_true) (mkConst ``Bool.eq_eq_false) (. = .) a b
   | Nat => evalBinPred getNatValue? (mkConst ``Nat.eq_eq_true) (mkConst ``Nat.eq_eq_false) (. = .) a b
   | Int => evalBinPred getIntValue? (mkConst ``Int.eq_eq_true) (mkConst ``Int.eq_eq_false) (. = .) a b
   | Rat => evalBinPred getRatValue? (mkConst ``Rat.eq_eq_true) (mkConst ``Rat.eq_eq_false) (. = .) a b
@@ -465,6 +467,21 @@ def evalEq (α : Expr) (a b : Expr) : SimpM Result :=
   | Char => evalBinPred getCharValue? (mkConst ``Char.eq_eq_true) (mkConst ``Char.eq_eq_false) (. = .) a b
   | String => evalStringEq a b
   | _ => return .rfl
+
+/--
+Evaluates `@Eq α a b` when `a` and `b` are applications of *different* constructors,
+reducing the equality to `False` via `noConfusion`. Ported from `Meta.Simp.reduceCtorEq`.
+-/
+def evalCtorEq (e a b : Expr) : SimpM Result := withReducibleAndInstances do
+  match (← constructorApp'? a), (← constructorApp'? b) with
+  | some (c₁, _), some (c₂, _) =>
+    if c₁.name != c₂.name then
+      withLocalDeclD `h e fun h => do
+        let proof ← withDefault <| mkEqFalse' (← mkLambdaFVars #[h] (← mkNoConfusion (mkConst ``False) h))
+        return .step (← getFalseExpr) proof (done := true)
+    else
+      return .rfl
+  | _, _ => return .rfl
 
 def evalDvd (α : Expr) (a b : Expr) : SimpM Result :=
   match_expr α with
