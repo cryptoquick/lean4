@@ -10,6 +10,8 @@ public import Lean.Meta.Tactic.BVDecide.Normalize.Basic
 import Lean.Meta.Sym.Simp.Rewrite
 import Lean.Meta.Sym.InstantiateMVarsS
 import Lean.Meta.Sym.LitValues
+import Init.Data.UInt.IntToBitVec
+import Init.Data.SInt.IntToBitVec
 
 /-!
 This module contains the implementation of the pre processing pass for reducing `UIntX`/`IntX` to
@@ -53,6 +55,28 @@ private def addSizeHyp (f : FVarId) : M Unit := do
 
 end M
 
+def toBitVecOfNatProc : Sym.Simp.Simproc := fun e => do
+  match_expr e with
+  | UInt8.toBitVec x => runProc x 8 (mkConst ``UInt8.toBitVec_ofNat)
+  | UInt16.toBitVec x => runProc x 16 (mkConst ``UInt16.toBitVec_ofNat)
+  | UInt32.toBitVec x => runProc x 32 (mkConst ``UInt32.toBitVec_ofNat)
+  | UInt64.toBitVec x => runProc x 64 (mkConst ``UInt64.toBitVec_ofNat)
+  | USize.toBitVec32 x h => runProc x 32 (mkApp (mkConst ``USize.toBitVec32_ofNat) h)
+  | USize.toBitVec64 x h => runProc x 64 (mkApp (mkConst ``USize.toBitVec64_ofNat) h)
+  | Int8.toBitVec x => runProc x 8 (mkConst ``Int8.toBitVec_ofNat)
+  | Int16.toBitVec x => runProc x 16 (mkConst ``Int16.toBitVec_ofNat)
+  | Int32.toBitVec x => runProc x 32 (mkConst ``Int32.toBitVec_ofNat)
+  | Int64.toBitVec x => runProc x 64 (mkConst ``Int64.toBitVec_ofNat)
+  | ISize.toBitVec32 x h => runProc x 32 (mkApp (mkConst ``ISize.toBitVec32_ofNat) h)
+  | ISize.toBitVec64 x h => runProc x 64 (mkApp (mkConst ``ISize.toBitVec64_ofNat) h)
+  | _ => return .rfl
+where
+  runProc (expr : Expr) (width : Nat) (thm : Expr) : Sym.Simp.SimpM Sym.Simp.Result := do
+    let some value := Sym.getNatValue? expr | return .rfl
+    let expr ← Sym.share <| toExpr <| BitVec.ofNat width value
+    let proof := mkApp thm (toExpr value)
+    return .step expr proof
+
 public def addIntToBitVecLemmas (goal : MVarId) (methods : Sym.Simp.Methods) :
     Sym.SymM Sym.Simp.Methods := do
   let intToBvThms ← symIntToBitVecExt.getTheorems
@@ -68,7 +92,9 @@ public def addIntToBitVecLemmas (goal : MVarId) (methods : Sym.Simp.Methods) :
         return .solved proof
     else
       Sym.Simp.dischargeNone
-  return { methods with pre := methods.pre >> intToBvThms.rewrite (d := discharge) }
+  return { methods with
+    pre := methods.pre >> intToBvThms.rewrite (d := discharge) >> toBitVecOfNatProc
+  }
 where
   /--
   Builds an expression of type: `System.Platform.numBits = const` from the hypotheses in the context
