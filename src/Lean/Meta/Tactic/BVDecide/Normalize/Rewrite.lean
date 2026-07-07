@@ -34,8 +34,9 @@ public def rewriteRulesPass : Pass where
     let dsimpMethods := {
       post := Sym.DSimp.evalGround >> rewriteDsimproc
     }
+    let discharger := Sym.Simp.mkDischargerFromSimproc Sym.Simp.evalGround
     let simpMethods := {
-      post := Sym.Simp.evalGround >> Normalize.rewriteSimproc >> bvThms.rewrite
+      post := Sym.Simp.evalGround >> Normalize.rewriteSimproc >> bvThms.rewrite (d := discharger)
     }
 
     let goal ← PreProcessM.getGoal
