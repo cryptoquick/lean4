@@ -42,8 +42,9 @@ public def rewriteRulesPass : Pass where
     let goal ← PreProcessM.getGoal
     goal.withContext do
       PreProcessM.mapHyps fun hyp => do
-        let type ← Sym.dsimp hyp.type dsimpMethods { config with }
-        let res ← Sym.simp type simpMethods config
+        let newType ← Sym.dsimp hyp.type dsimpMethods { config with }
+        let hyp := { hyp with type := newType }
+        let res ← Sym.simp hyp.type simpMethods config
         hyp.applySimpResult res
 
 end Normalize
