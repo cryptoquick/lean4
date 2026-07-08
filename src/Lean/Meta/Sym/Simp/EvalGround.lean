@@ -808,7 +808,7 @@ public def evalGround (config : EvalStepConfig := {}) : Simproc := fun e =>
   | BitVec.cast _ m _ x => evalBitVecCast m x
   | BitVec.setWidth' _ w _ x => evalBitVecSetWidth' w x
   | BitVec.signExtend _ m x => evalBitVecExtend BitVec.signExtend m x
-  | BitVec.extractLsb' start len _ x => evalBitVecExtractLsb' start len x
+  | BitVec.extractLsb' _ start len x => evalBitVecExtractLsb' start len x
   | BitVec.replicate _ i x => evalBitVecReplicate i x
   | BitVec.shiftLeftZeroExtend _ x m => evalBitVecShiftLeftZeroExtend x m
   | BitVec.allOnes n => evalBitVecAllOnes n

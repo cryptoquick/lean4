@@ -14,7 +14,7 @@ theorem shift_unit_2 {x y : BitVec 64} : x >>> 65 = y >>> 66 := by
 theorem shift_unit_2' {x y : BitVec 64} : BitVec.ushiftRight x 65 = y >>> 66 := by
   bv_decide
 
-theorem shift_unit_3 {x : BitVec 64} : (x <<< 32) <<< 32 = (x >>> 32) >>> 32 := by
+theorem shift_unit_3 {x : BitVec 64} : (x <<< 31) <<< 33 = (x >>> 30) >>> 34 := by
   bv_decide
 
 theorem shift_unit_5 {x y z : BitVec 16} : (x <<< y) <<< z = (x <<< z) <<< y := by
