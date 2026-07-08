@@ -45,6 +45,15 @@ theorem WP.Frames.op_wp_upperAdjoint_le_wp {R : Type t} (op : R → Pred → Pre
   intro
   apply PreservesSup.upperAdjoint_le
 
+/-- `PreservesSup.le_frameClosure` at the `wp` layer: when `x` frames every resource `r`, landing
+below `wp x Q E` suffices to land below the frame closure of `wp x · E`. -/
+theorem WP.Frames.le_frameClosure {R : Type t} (op : R → Pred → Pred) [∀ r, PreservesSup (op r)]
+    {x : Prog} (hframes : ∀ r, WP.Frames op x r) {Q : Value → Pred} {E : EPred} {pre : Pred}
+    (hpre : pre ⊑ wp x Q E) :
+    pre ⊑ PreservesSup.frameClosure op (fun Q => wp x Q E) Q :=
+  PreservesSup.le_frameClosure op (fun Q => wp x Q E)
+    (fun r Q' => (hframes r).conj_wp_le_wp_conj Q' E) hpre
+
 /-- If `wp` is built as `PreservesSup.frameClosure op` over a base post-transformer `f x E` (the frame
 rule internalized into `wp`), then every program frames every resource `F` with respect to `op`. -/
 theorem WP.Frames.of_frameClosure {R : Type t} (op : R → Pred → Pred) [∀ r, PreservesSup (op r)]

@@ -90,6 +90,33 @@ theorem frameClosure_frames {R : Type v} {β : Type w} (op : R → α → α) [�
   funext a
   rw [hact F' F (Q a)]
 
+/-- Landing below the frame closure, transposed across the Galois connection: `pre ⊑ frameClosure op k Q`
+holds exactly when `op r pre ⊑ k (fun a => op r (Q a))` for every resource `r`. At a unit resource
+(`op e = id`) the `r = e` conjunct is `pre ⊑ k Q`; the remaining conjuncts are the frame conditions on
+`pre`, so a `pre` that cannot frame is forced down to the trivial `⊥`. -/
+theorem le_frameClosure_iff {R : Type v} {β : Type w} (op : R → α → α) [∀ r, PreservesSup (op r)]
+    (k : (β → α) → α) {Q : β → α} {pre : α} :
+    pre ⊑ frameClosure op k Q ↔ ∀ r, op r pre ⊑ k (fun a => op r (Q a)) := by
+  constructor
+  · intro h r
+    exact PartialOrder.rel_trans (map_mono (op r) (PartialOrder.rel_trans h (iInf_le _ r)))
+      (upperAdjoint_le (op r) _)
+  · intro h
+    apply le_iInf
+    intro r
+    exact le_upperAdjoint (op r) (h r)
+
+/-- Landing below the frame closure reduces to landing below the base transformer together with
+framing: if `pre ⊑ k Q` and `k` frames every `op r` (`op r (k Q') ⊑ k (fun a => op r (Q' a))`), then
+`pre ⊑ frameClosure op k Q`. -/
+theorem le_frameClosure {R : Type v} {β : Type w} (op : R → α → α) [∀ r, PreservesSup (op r)]
+    (k : (β → α) → α) {Q : β → α} {pre : α}
+    (hframe : ∀ (r : R) (Q' : β → α), op r (k Q') ⊑ k (fun a => op r (Q' a)))
+    (hpre : pre ⊑ k Q) :
+    pre ⊑ frameClosure op k Q :=
+  (le_frameClosure_iff op k).mpr fun r =>
+    PartialOrder.rel_trans (map_mono (op r) hpre) (hframe r Q)
+
 end PreservesSup
 
 /-- Frame a single state coordinate: from the function-order premise `(fun u => ⌜u = s⌝ ⊓ pre) ⊑ Q`

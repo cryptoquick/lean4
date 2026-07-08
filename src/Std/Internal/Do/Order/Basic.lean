@@ -177,7 +177,7 @@ theorem sup_apply
     exact (le_sup (c := c) hf) s
 
 /-- Pointwise characterization of binary meet on function lattices. -/
-@[simp] theorem meet_apply
+@[simp, grind =] theorem meet_apply
     {σ : Type v} {β : σ → Type w} [∀ s, CompleteLattice (β s)]
     (a b : ∀ s, β s) (s : σ) :
     (a ⊓ b) s = a s ⊓ b s := by
@@ -400,7 +400,7 @@ theorem CompleteLattice.ofProp_intro_r [CompleteLattice l] (p : Prop) (x y : l) 
     next => exact PartialOrder.rel_trans (meet_le_left ⊥ x) (bot_le _)
 
 /-- Pointwise characterization of `CompleteLattice.ofProp` on a function lattice. -/
-@[simp] theorem CompleteLattice.ofProp_apply
+@[simp, grind .] theorem CompleteLattice.ofProp_apply
     {σ : Type v} {β : Type u} [CompleteLattice β] (p : Prop) (s : σ) :
     (⌜p⌝ : σ → β) s = (⌜p⌝ : β) := by
   simp only [CompleteLattice.ofProp]

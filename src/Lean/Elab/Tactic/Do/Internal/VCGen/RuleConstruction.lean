@@ -39,7 +39,7 @@ entailment `pre ⊑ e s₁ … sₙ`.
 public def LatticeSplit.meet : LatticeSplit where
   mkOperator _ as _ := mkAppM ``meet as
   applyEq := some ``meet_apply
-  introThm := ``le_meet           -- le_meet (x y z) : x ⊑ y → x ⊑ z → x ⊑ y ⊓ z
+  introThm := some ``le_meet           -- le_meet (x y z) : x ⊑ y → x ⊑ z → x ⊑ y ⊓ z
   numParams := 0
   numOperands := 2
 
@@ -49,7 +49,7 @@ upper-adjoint unit `le_upperAdjoint`, with the meet slice unified from the goal.
 public def LatticeSplit.himp : LatticeSplit where
   mkOperator _ as _ := mkAppM ``Lean.Order.himp as
   applyEq := some ``himp_apply
-  introThm := ``Lean.Order.le_himp  -- le_himp {a b x} (h : a ⊓ x ⊑ b) : x ⊑ a ⇨ b
+  introThm := some ``Lean.Order.le_himp  -- le_himp {a b x} (h : a ⊓ x ⊑ b) : x ⊑ a ⇨ b
   numParams := 0
   numOperands := 2
 
@@ -59,7 +59,7 @@ public def LatticeSplit.ofProp : LatticeSplit where
   mkOperator _ as resultType? :=
     mkAppOptM ``Lean.Order.CompleteLattice.ofProp #[resultType?, none, some as[0]!]
   applyEq := some ``Lean.Order.CompleteLattice.ofProp_apply
-  introThm := ``Lean.Order.top_le_ofProp -- top_le_ofProp (p) : p → ⊤ ⊑ ⌜p⌝
+  introThm := some ``Lean.Order.top_le_ofProp -- top_le_ofProp (p) : p → ⊤ ⊑ ⌜p⌝
   numParams := 0
   numOperands := 1
 
@@ -67,7 +67,7 @@ public def LatticeSplit.ofProp : LatticeSplit where
 public def LatticeSplit.top : LatticeSplit where
   mkOperator _ _ resultType? := mkAppOptM ``Lean.Order.top #[resultType?, none]
   applyEq := some ``Lean.Order.top_apply
-  introThm := ``le_top            -- le_top (x) : x ⊑ ⊤  (no premise ⇒ closes the goal)
+  introThm := some ``le_top            -- le_top (x) : x ⊑ ⊤  (no premise ⇒ closes the goal)
   numParams := 0
   numOperands := 0
 
@@ -77,7 +77,7 @@ the function level, leaving the framed condition `f (⌜·⃗ = s⃗⌝ ⊓ pre)
 public def LatticeSplit.upperAdjoint : LatticeSplit where
   mkOperator _ as _ := mkAppM ``Lean.Order.PreservesSup.upperAdjoint as
   applyEq := none
-  introThm := ``Lean.Order.PreservesSup.le_upperAdjoint
+  introThm := some ``Lean.Order.PreservesSup.le_upperAdjoint
   numParams := 0
   numOperands := 2
 
@@ -112,7 +112,8 @@ proof has type `((a ⊓ b) s₁ s₂) = (a s₁ s₂ ⊓ b s₁ s₂)`.
 -/
 private partial def LatticeSplit.mkApplyEq
     (c : LatticeSplit) (params : Array Expr)
-    (as : Array Expr) (ss : List Expr) (resultType? : Option Expr := none) : MetaM Expr := do
+    (as : Array Expr) (ss : List Expr) (fuel : Nat) (resultType? : Option Expr := none) :
+    MetaM Expr := do
   match ss with
   | [] => mkEqRefl =<< c.mkOperator params as resultType?
   | s :: ss' =>
@@ -131,8 +132,10 @@ private partial def LatticeSplit.mkApplyEq
       throwError "LatticeSplit.mkApplyEq: `applyEq` {applyEq} LHS{indentExpr lhs}\n\
         does not match{indentExpr opAppS}"
     let step := mkAppN applyEqConst mvars
-    if ss'.isEmpty then
-      return step
+    -- Once the operator's own index arguments are exhausted (`fuel ≤ 1`), the remaining state
+    -- arguments belong to the residual lattice: lift the equation over them and stop.
+    if fuel ≤ 1 || ss'.isEmpty then
+      return ← liftEqByArgs step ss'
     -- An operand that is a function of `s` descends one lattice level by being applied to `s`;
     -- a state-independent operand (`⌜·⌝`/`⊤`) stays put. Recurse on the remaining state args.
     let sTy ← Meta.inferType s
@@ -142,7 +145,7 @@ private partial def LatticeSplit.mkApplyEq
       | _ => pure false
     let stepLift ← liftEqByArgs step ss'
     let as := as.zipWith (fun a isFn => if isFn then mkApp a s else a) stateFns
-    let rest ← c.mkApplyEq params as ss' (resultType?.map .bindingBody!)
+    let rest ← c.mkApplyEq params as ss' (fuel - 1) (resultType?.map .bindingBody!)
     mkEqTrans stepLift rest
 
 /-- Distribute a lattice connective through function applications via its `_apply` lemma,
@@ -153,7 +156,7 @@ private def LatticeSplit.mkDistributeEq
     MetaM (Expr × Expr) := do
   let lat ← c.mkOperator params as resultType?
   let goal := mkAppN lat ss
-  let eqFun ← c.mkApplyEq params as ss.toList resultType?
+  let eqFun ← c.mkApplyEq params as ss.toList (c.applyArity.getD ss.size) resultType?
   return (goal, eqFun)
 
 /--
@@ -166,7 +169,9 @@ private partial def LatticeSplit.mkPointFrame
     (c : LatticeSplit) (opAs pre : Expr) (ss : List Expr) : MetaM Expr := do
   match ss with
   | [] =>
-    let introRule ← mkConstWithFreshMVarLevels c.introThm
+    let some introThm := c.introThm
+      | throwError "LatticeSplit.mkPointFrame requires an `introThm`"
+    let introRule ← mkConstWithFreshMVarLevels introThm
     let (xs, _, body) ← forallMetaTelescope (← Meta.inferType introRule)
     let target ← mkAppM ``PartialOrder.rel #[pre, opAs]
     unless ← isDefEq body target do
@@ -226,13 +231,19 @@ public def LatticeSplit.mkBackwardRuleForLattice
       let relEqSymm ← mkEqSymm (← mkCongrArg relPreGoal eqGoalDistributed)
       -- eqMp : (pre ⊑ distributed) → (pre ⊑ goal)
       let eqMp ← mkAppM ``Eq.mp #[relEqSymm]
-      -- Instantiate the introduction rule (le_meet / le_himp / top_le_ofProp / le_top) via telescope
-      -- and unify its conclusion with eqMp's domain to assign the operand mvars.
-      let introRule ← mkConstWithFreshMVarLevels c.introThm
-      let (xs, _, body) ← forallMetaTelescope (← Meta.inferType introRule)
-      unless ← isDefEq body (← Meta.inferType eqMp).bindingDomain! do
-        throwError "Expected {← Meta.inferType eqMp}.bindingDomain! = {← Meta.inferType body}"
-      pure <| mkApp eqMp (mkAppN introRule xs)
+      match c.introThm with
+      | none =>
+        -- An unfolding split leaves `pre ⊑ distributed` as the single premise; a subsequent split
+        -- decomposes the rewritten form.
+        pure eqMp
+      | some introThm =>
+        -- Instantiate the introduction rule (le_meet / le_himp / top_le_ofProp / le_top) via
+        -- telescope and unify its conclusion with eqMp's domain to assign the operand mvars.
+        let introRule ← mkConstWithFreshMVarLevels introThm
+        let (xs, _, body) ← forallMetaTelescope (← Meta.inferType introRule)
+        unless ← isDefEq body (← Meta.inferType eqMp).bindingDomain! do
+          throwError "Expected {← Meta.inferType eqMp}.bindingDomain! = {← Meta.inferType body}"
+        pure <| mkApp eqMp (mkAppN introRule xs)
     | none =>
       let opAs ← c.mkOperator params as resultType?
       let pre ← mkFreshExprMVar (userName := `Pre) (← Meta.inferType (mkAppN opAs ss))

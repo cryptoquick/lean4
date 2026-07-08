@@ -75,8 +75,9 @@ public def mkBackwardRuleForLatticeCached (c : LatticeSplit) (params as excessAr
   let s := (← get).latticeBackwardRuleCache
   let asTypes ← (as.mapM Sym.inferType : SymM (Array Expr))
   -- `params` (e.g. the frame operator of `PreservesSup.upperAdjoint`) is functionally determined by `asTypes`,
-  -- so it need not enter the cache key.
-  let key := (c.introThm, asTypes.map ExprPtr.mk, excessArgs.size)
+  -- so it need not enter the cache key. An unfolding split has no `introThm`, so key on its `applyEq`.
+  let ruleKey := (c.introThm <|> c.applyEq).getD .anonymous
+  let key := (ruleKey, asTypes.map ExprPtr.mk, excessArgs.size)
   if let some rule := s[key]? then return rule
   let rule ← c.mkBackwardRuleForLattice params as excessArgs resultType?
   let rule ← rule.shareCommon

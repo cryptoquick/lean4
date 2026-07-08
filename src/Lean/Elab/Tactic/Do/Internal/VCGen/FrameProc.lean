@@ -60,21 +60,20 @@ public abbrev VCGen.FrameInferenceProc := Expr → Expr → VCGen.WPInfo → Sym
 /-- A decomposition of a lattice operator on the RHS of an entailment `pre ⊑ op … s⃗`. A custom frame
 operator registers its own split through the `FrameProc` selected in `Context.selectedFrameProc?`.
 
-The operator's `⊑`-introduction rule `introThm` concludes `x ⊑ op` at the function level. How the
-excess (state) arguments `s⃗` are handled follows the shape of the split:
+How the excess (state) arguments `s⃗` are handled follows the shape of the split:
 
-- `applyEq := some _`: distribute `op … s⃗` pointwise through the state arguments via the `_apply`
-  equation, then apply `introThm`. Used by `⊓`/`⇨`/`⌜·⌝`/`⊤`.
-- `applyEq := none` with operands: point-frame the state arguments, gating the precondition to
-  `⌜·⃗ = s⃗⌝ ⊓ pre`, then apply `introThm` at the function level. Used by `PreservesSup.upperAdjoint`.
-- `applyEq := none` without operands: apply `introThm` directly as a backward rule; the remaining
-  fields are unused. -/
+- `applyEq := some _`, `introThm := some _`: distribute `op … s⃗` pointwise through the state
+  arguments via the `_apply` equation, then apply `introThm`. Used by `⊓`/`⇨`/`⌜·⌝`/`⊤`.
+- `applyEq := some _`, `introThm := none` (an unfolding split): rewrite `op … s⃗` through its
+  unfolding `_apply` equation and leave the result for a subsequent split. Used by `costConj`.
+- `applyEq := none`: point-frame the state arguments, gating the precondition to `⌜·⃗ = s⃗⌝ ⊓ pre`,
+  then apply `introThm` at the function level. Used by `PreservesSup.upperAdjoint`. -/
 public structure VCGen.LatticeSplit where
   /-- The `⊑`-form introduction rule decomposing `pre ⊑ op`: it concludes `_ ⊑ op` with the operand
-  subgoals as premises. -/
-  introThm : Name
+  subgoals as premises. `none` for an unfolding split, whose `applyEq` fully rewrites the operator. -/
+  introThm : Option Name := none
   /-- The pointwise `_apply` equation distributing the operator through function application, or
-  `none` to point-frame the state arguments (with operands) or apply `introThm` directly (without). -/
+  `none` to point-frame the state arguments. -/
   applyEq : Option Name := none
   /-- Rebuild the operator from its fixed parameters `params`, its operands `as`, and the optional
   lattice carrier type. Unused when `applyEq` is `none` and there are no operands. -/
@@ -85,6 +84,11 @@ public structure VCGen.LatticeSplit where
   /-- The number of explicit operands the operator takes after its carrier type, instance, and
   parameters: `2` for `⊓`/`⇨`/`upperAdjoint`, `1` for `⌜·⌝`, `0` for `⊤`. -/
   numOperands : Nat := 0
+  /-- The number of leading state arguments the operator itself indexes, over which `applyEq`
+  distributes; `none` distributes over every state argument. A pointwise operator (`⊓`/`⇨`/`⌜·⌝`/`⊤`)
+  indexes them all (`none`); an operator over a nested lattice (e.g. `costConj` on `Nat → L`) indexes
+  only its own, leaving the rest on the residual for a subsequent split. -/
+  applyArity : Option Nat := none
 
 /-- A frame inference procedure registered with `@[frameproc]`, together with its frame operator. The
 `vcgen` frontend selects the one whose `prog` matches the goal program's monad and stores it in
