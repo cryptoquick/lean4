@@ -99,9 +99,9 @@ public def splitLatticeOp? (goal : MVarId) (rhs : Expr) :
     -- other operator (including the generic residual wand `PreservesSup.upperAdjoint f b`) through
     -- the built-in `latticeSplits`.
     let some c := (ctx.frameProcs.byOp[headName]?.map (·.split)) <|> latticeSplits[headName]? | return none
-    let params := args.extract 2 (2 + c.numParams)
-    let as := args.extract (2 + c.numParams) (2 + c.numParams + c.numOperands)
-    let excessArgs := args.drop (2 + c.numParams + c.numOperands)
+    let params := args.extract 0 c.numParams
+    let as := args.extract c.numParams (c.numParams + c.numOperands)
+    let excessArgs := args.drop (c.numParams + c.numOperands)
     let rule ← mkBackwardRuleForLatticeCached c params as excessArgs args[0]?
     match ← rule.applyChecked goal with
     | .goals goals => return some goals

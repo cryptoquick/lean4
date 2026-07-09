@@ -240,6 +240,7 @@ for a subsequent meet split. -/
 def costSplit : LatticeSplit where
   mkOperator _ as _ := Meta.mkAppM ``costConj as
   applyEq := some ``costConj_apply
+  numParams := 2
   numOperands := 2
   applyArity := some 1
 

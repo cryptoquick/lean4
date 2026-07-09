@@ -80,7 +80,9 @@ public structure VCGen.LatticeSplit where
   lattice carrier type. Unused when `applyEq` is `none` and there are no operands. -/
   mkOperator : Array Expr → Array Expr → Option Expr → MetaM Expr := fun _ _ _ =>
     throwError "LatticeSplit.mkOperator is unavailable for a direct split (applyEq := none)"
-  /-- The number of fixed parameters before the operands: `0` for `⊓`/`⌜·⌝`/`⊤`/`upperAdjoint`. -/
+  /-- The number of leading arguments before the operands: the carrier type, the lattice instance,
+  and any fixed parameters. `2` for the typeclass operators `⊓`/`⇨`/`⌜·⌝`/`⊤`/`upperAdjoint` (carrier
+  and instance); `0` for a monomorphic operator with no such prefix. -/
   numParams : Nat := 0
   /-- The number of explicit operands the operator takes after its carrier type, instance, and
   parameters: `2` for `⊓`/`⇨`/`upperAdjoint`, `1` for `⌜·⌝`, `0` for `⊤`. -/

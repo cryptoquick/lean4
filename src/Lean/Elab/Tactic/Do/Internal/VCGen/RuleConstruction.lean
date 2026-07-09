@@ -40,7 +40,7 @@ public def LatticeSplit.meet : LatticeSplit where
   mkOperator _ as _ := mkAppM ``meet as
   applyEq := some ``meet_apply
   introThm := some ``le_meet           -- le_meet (x y z) : x ⊑ y → x ⊑ z → x ⊑ y ⊓ z
-  numParams := 0
+  numParams := 2
   numOperands := 2
 
 /-- Heyting implication `⇨ = himp`, the meet upper adjoint. `himp` bakes in `(· ⊓ ·)`, so it has no
@@ -50,7 +50,7 @@ public def LatticeSplit.himp : LatticeSplit where
   mkOperator _ as _ := mkAppM ``Lean.Order.himp as
   applyEq := some ``himp_apply
   introThm := some ``Lean.Order.le_himp  -- le_himp {a b x} (h : a ⊓ x ⊑ b) : x ⊑ a ⇨ b
-  numParams := 0
+  numParams := 2
   numOperands := 2
 
 /-- The pure assertion embedding `⌜·⌝`. The `⊤`-fixed split lemma makes the rule apply only when the
@@ -60,7 +60,7 @@ public def LatticeSplit.ofProp : LatticeSplit where
     mkAppOptM ``Lean.Order.CompleteLattice.ofProp #[resultType?, none, some as[0]!]
   applyEq := some ``Lean.Order.CompleteLattice.ofProp_apply
   introThm := some ``Lean.Order.top_le_ofProp -- top_le_ofProp (p) : p → ⊤ ⊑ ⌜p⌝
-  numParams := 0
+  numParams := 2
   numOperands := 1
 
 /-- The lattice top `⊤`. Has no operands; `le_top` has no premise, so the rule closes the goal. -/
@@ -68,7 +68,7 @@ public def LatticeSplit.top : LatticeSplit where
   mkOperator _ _ resultType? := mkAppOptM ``Lean.Order.top #[resultType?, none]
   applyEq := some ``Lean.Order.top_apply
   introThm := some ``le_top            -- le_top (x) : x ⊑ ⊤  (no premise ⇒ closes the goal)
-  numParams := 0
+  numParams := 2
   numOperands := 0
 
 /-- The magic-wand residual `PreservesSup.upperAdjoint f b`. Point-framing (`applyEq := none` with
@@ -78,7 +78,7 @@ public def LatticeSplit.upperAdjoint : LatticeSplit where
   mkOperator _ as _ := mkAppM ``Lean.Order.PreservesSup.upperAdjoint as
   applyEq := none
   introThm := some ``Lean.Order.PreservesSup.le_upperAdjoint
-  numParams := 0
+  numParams := 2
   numOperands := 2
 
 /-- The lattice operators VCGen decomposes on the RHS of an entailment, keyed by head constant. -/
