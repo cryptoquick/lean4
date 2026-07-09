@@ -441,11 +441,11 @@ private def matchFrameProc? (pre : Expr) (info : WPInfo) :
     VCGenM (Option (Expr × Expr)) := do
   -- Select the procedure registered for this node's monad. A program may reach sub-programs in
   -- different monads (e.g. a `monadLift`ed base call), so the choice is per node, not per run.
-  let procs := (← read).frameProcs.procs
+  let procs := (← read).frameProcs.byProg
   let fp? := info.M.getAppFn.constName?.bind (procs[·]?)
   let (op, resourceTy) ← match fp? with
     | some fp =>
-      let op ← fp.op info
+      let op ← fp.mkOpAppM info
       pure (op, (← Meta.inferType op).bindingDomain!)
     | none =>
       let op ← Meta.mkAppOptM ``Lean.Order.meet #[info.Pred, none]

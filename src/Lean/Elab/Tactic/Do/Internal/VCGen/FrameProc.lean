@@ -58,7 +58,8 @@ optionally produce a frame `F : R` to apply. -/
 public abbrev VCGen.FrameInferenceProc := Expr → Expr → VCGen.WPInfo → SymM (Option Expr)
 
 /-- A decomposition of a lattice operator on the RHS of an entailment `pre ⊑ op … s⃗`. A custom frame
-operator registers its own split through the `FrameProc` selected in `Context.selectedFrameProc?`.
+operator supplies its own split through its `@[frameproc]`, found by `splitLatticeOp?` via the
+`FrameProcs.byOp` index.
 
 How the excess (state) arguments `s⃗` are handled follows the shape of the split:
 
@@ -91,34 +92,33 @@ public structure VCGen.LatticeSplit where
   applyArity : Option Nat := none
 
 /-- A frame inference procedure registered with `@[frameproc]`, together with its frame operator. The
-`vcgen` frontend selects the one whose `prog` matches the goal program's monad and stores it in
-`Context.selectedFrameProc?`. -/
+`vcgen` frontend selects the one whose `prog` matches the goal program's monad. -/
 public structure VCGen.FrameProc where
   /-- Head constant of the program type (the monad) whose `wp` this procedure frames. Keys the
-  procedure in the registry; `vcgen` consults it for a program with that head. -/
+  procedure in the `byProg` index; `vcgen` consults it for a program with that head. -/
   prog : Name
+  /-- Head constant of the frame operator. Keys the procedure in the `byOp` index, consulted by
+  `splitLatticeOp?` to decompose a frame residual `op F R`. -/
+  op : Name
+  /-- Builds the frame operator (head constant `op`) applied to the goal's assertion type. -/
+  mkOpAppM : VCGen.WPInfo → MetaM Expr
+  /-- The lattice split decomposing the frame operator `op F R` on the RHS of an entailment.
+  Consulted for a residual whose head is not a built-in `latticeSplits` operator. -/
+  split : VCGen.LatticeSplit
   /-- The frame inference metaprogram. -/
   proc : VCGen.FrameInferenceProc
-  /-- Head constant of the frame operator framed with; keys `split` for `splitLatticeOp?`. -/
-  conj : Name
-  /-- Builds the frame operator (head constant `conj`) for the goal's assertion type. -/
-  op : VCGen.WPInfo → MetaM Expr
-  /-- The lattice split decomposing `conj F R` on the RHS of an entailment. -/
-  split : VCGen.LatticeSplit
 
-/-- The registered frame inference procedures: the procedures keyed by the head constant of the
-program type (the monad) they frame, and their lattice splits keyed by frame-operator head
-constant. Selected per program node in `solve`, so a run touching several monads uses each monad's
-own procedure. -/
+/-- The registered frame inference procedures, indexed two ways into the same database: `byProg` by
+the program monad's head constant (selected per node in `solve`), and `byOp` by the frame operator's
+head constant (consulted by `splitLatticeOp?` to decompose a frame residual). -/
 public structure VCGen.FrameProcs where
-  procs : Std.HashMap Name VCGen.FrameProc := {}
-  /-- Splits for the frame operators `conj F R`, keyed by `conj` head. -/
-  splits : Std.HashMap Name VCGen.LatticeSplit := {}
+  byProg : Std.HashMap Name VCGen.FrameProc := {}
+  byOp : Std.HashMap Name VCGen.FrameProc := {}
 
 public instance : Inhabited VCGen.FrameProcs := ⟨{}⟩
 
 public def VCGen.FrameProcs.insert (s : FrameProcs) (fp : FrameProc) : FrameProcs :=
-  { procs := s.procs.insert fp.prog fp
-    splits := s.splits.insert fp.conj fp.split }
+  { byProg := s.byProg.insert fp.prog fp
+    byOp := s.byOp.insert fp.op fp }
 
 end Lean.Elab.Tactic.Do.Internal

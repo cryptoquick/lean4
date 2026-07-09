@@ -95,10 +95,10 @@ public def splitLatticeOp? (goal : MVarId) (rhs : Expr) :
   rhs.withApp fun head args => do
     let some headName := head.constName? | return none
     let ctx ← read
-    -- A registered frame operator `conj F R` decomposes through its `split`; every other operator
-    -- (including the generic residual wand `PreservesSup.upperAdjoint f b`) through the built-in
-    -- `latticeSplits`.
-    let some c := ctx.frameProcs.splits[headName]? <|> latticeSplits[headName]? | return none
+    -- A registered frame operator `op F R` decomposes through its frame procedure's `split`; every
+    -- other operator (including the generic residual wand `PreservesSup.upperAdjoint f b`) through
+    -- the built-in `latticeSplits`.
+    let some c := (ctx.frameProcs.byOp[headName]?.map (·.split)) <|> latticeSplits[headName]? | return none
     let params := args.extract 2 (2 + c.numParams)
     let as := args.extract (2 + c.numParams) (2 + c.numParams + c.numOperands)
     let excessArgs := args.drop (2 + c.numParams + c.numOperands)
