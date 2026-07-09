@@ -36,6 +36,31 @@ For these it:
 namespace Lean.Meta.Tactic.BVDecide
 namespace Normalize
 
+structure ProjInfo where
+  /-- Pre computed arity of the projection -/
+  arity : Nat
+  /-- Given proj (ctor.mk x1 x2 ... xn)  which xi do we reduce to -/
+  offset : Nat
+  /--
+  Name of the accompanying constructor
+  -/
+  ctorName : Name
+
+def projCtorProc (projFns : Std.HashMap Name ProjInfo) (ctors : Std.HashMap Name Nat) :
+    Sym.Simp.Simproc := fun e => do
+  e.withApp fun fn args => do
+    let .const fn _ := fn | return .rfl
+    let some projInfo := projFns[fn]? | return .rfl
+    unless args.size == projInfo.arity do return .rfl
+    let structArg := args.back!
+    structArg.withApp fun structFn structArgs => do
+      let .const structFn _ := structFn | return .rfl
+      unless structFn == projInfo.ctorName do return .rfl
+      let some ctorArity := ctors[structFn]? | return .rfl
+      unless ctorArity == structArgs.size do return .rfl
+      let result := structArgs[projInfo.offset]!
+      return .step result (← mkEqRefl result)
+
 /--
 Add simp lemmas that we want to apply to structures that we find interesting to `simprocs` and
 `theorems`.
@@ -44,10 +69,15 @@ public def addStructureSimpLemmas (methods : Sym.Simp.Methods) :
     PreProcessM Sym.Simp.Methods := do
   let mut extTheorems : Sym.Simp.Theorems := {}
   let mut projFns := {}
+  let mut projFnIndex := {}
+  let mut ctorIndex := {}
   let interesting := (← PreProcessM.getTypeAnalysis).interestingStructures
   let env ← getEnv
   for const in interesting do
     let constInfo ← getConstInfoInduct const
+    let ctor := constInfo.ctors.head!
+    let ctorArity := (← getConstVal ctor).type.getForallArity
+    ctorIndex := ctorIndex.insert ctor ctorArity
     if let some extIffThm ← findExtIff? constInfo then
       trace[Meta.Tactic.bv] m!"Using ext_iff: {extIffThm}"
       extTheorems := extTheorems.insert (← Sym.Simp.mkTheoremFromDecl extIffThm)
@@ -55,10 +85,19 @@ public def addStructureSimpLemmas (methods : Sym.Simp.Methods) :
     let fields := structInfo.fieldNames.size
     for proj in 0...fields do
       let some projFn := structInfo.getProjFn? proj | continue
+      let arity := (← getConstVal projFn).type.getForallArity
       projFns := projFns.insert projFn
+      projFnIndex := projFnIndex.insert projFn {
+        arity,
+        offset := proj + constInfo.numParams
+        ctorName := ctor
+      }
   return { methods with
     post := methods.post >> extTheorems.rewrite
-    pre := methods.pre >> applyIteSimproc projFns >> applyCondSimproc projFns
+    pre := methods.pre
+      >> applyIteSimproc projFns
+      >> applyCondSimproc projFns
+      >> projCtorProc projFnIndex ctorIndex
   }
 where
   findExtIff? (info : InductiveVal) : MetaM (Option Name) := do
