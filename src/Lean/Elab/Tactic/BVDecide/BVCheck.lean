@@ -54,7 +54,6 @@ def evalBvCheck : Tactic := fun
     let ctx ← mkContext path.getString cfg
     liftMetaFinishingTactic fun g => do
       Meta.Sym.SymM.run do
-        let g ← Meta.Sym.preprocessMVar g
         Normalize.PreProcessM.run' cfg g do
           if ← Normalize.bvNormalize then
             let bvNormalizeStx ← `(tactic| bv_normalize $cfgStx)

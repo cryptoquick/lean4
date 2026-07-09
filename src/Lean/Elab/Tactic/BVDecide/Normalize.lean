@@ -17,7 +17,6 @@ def evalBVNormalize : Tactic := fun
     let cfg ← Meta.Tactic.BVDecide.elabBVDecideConfig cfg
     let g ← getMainGoal
     let (_, state) ← Meta.Sym.SymM.run do
-      let g ← Meta.Sym.preprocessMVar g
       Meta.Tactic.BVDecide.Normalize.bvNormalize.run cfg g
     if ← state.goal.isAssigned then
       replaceMainGoal []

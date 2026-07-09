@@ -22,8 +22,6 @@ def popcount32_impl (x : BitVec 32) : BitVec 32 :=
 theorem popcount32_correct (x : BitVec 32) :
   (popcount32_spec x) = (popcount32_impl x) := by
   dsimp only [popcount32_spec_rec, popcount32_spec, popcount32_impl]
-  set_option trace.Meta.Tactic.bv true in
-  set_option pp.explicit true in
   bv_decide
 
 def parity32_spec_rec (i : Nat) (x : BitVec 32) : Bool :=

@@ -21,6 +21,4 @@ def P (s : State) : Prop := s.x > 3
 
 example : ∀ s1 s2 s3 s4, P s1 ∧ Transfer s1 s2 ∧ P s2 ∧ Transfer s2 s3 ∧ P s3 ∧ Transfer s3 s4 → P s4  := by
   simp [P]
-  bv_normalize
-  sorry
-  --bv_decide
+  bv_decide
