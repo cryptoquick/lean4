@@ -213,6 +213,10 @@ theorem TickT.le_wp_tick' [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPr
 
 open Lean.Elab.Tactic.Do.Internal Lean.Elab.Tactic.Do.Internal.VCGen
 
+-- TODO: the `@[frameproc]` frames only the outermost cost layer, so a cost-only spec like `tick ⏱ 1`
+-- does not thread the base state and cannot compose with base-state effects (see `tickAndBump`). The
+-- post-parametric spec sidesteps this; a nested frame mechanism would let `tick ⏱ 1` be the sole spec.
+
 /-- Exact spec for `tick`, registered so `vcgen` can decompose `tick` calls. -/
 @[spec] theorem tick_spec [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] :
     ⦃ fun n => Q () (n + 1) ⦄ (tick : TickT m Unit) ⦃ Q; E ⦄ := by
