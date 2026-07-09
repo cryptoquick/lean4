@@ -7,9 +7,9 @@ module
 
 prelude
 public import Lean.Meta.Tactic.BVDecide.Normalize.TypeAnalysis
+public import Lean.Meta.Sym.Simp.SimpM
 import Lean.Meta.Tactic.BVDecide.Normalize.ApplyControlFlow
 import Lean.Meta.Tactic.Ext
-public import Lean.Meta.Sym.Simp.SimpM
 import Lean.Meta.Sym.Simp.Theorems
 import Lean.Meta.Sym.Simp.Rewrite
 import Lean.Meta.Sym.Util

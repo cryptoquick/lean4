@@ -19,6 +19,7 @@ public import Lean.Meta.Tactic.BVDecide.Normalize.IntToBitVec
 public import Lean.Meta.Tactic.BVDecide.Normalize.Enums
 public import Lean.Meta.Tactic.BVDecide.Normalize.TypeAnalysis
 public import Lean.Meta.Tactic.BVDecide.Normalize.ShortCircuit
+public import Lean.Meta.Tactic.BVDecide.Normalize.Zeta
 import Lean.Meta.Sym.Util
 import Lean.Meta.Sym.Intro
 
@@ -60,6 +61,8 @@ public def bvNormalize : PreProcessM Bool := do
 
     if cfg.structures || cfg.enums then
       if ← typeAnalysisPass.run then return true
+
+    if ← zetaPass.run then return true
 
     /-
     There is a tension between the structures and enums pass at play:
