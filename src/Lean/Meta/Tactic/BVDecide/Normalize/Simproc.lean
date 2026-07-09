@@ -715,6 +715,7 @@ def boolBeq (lhs rhs : Expr) : Sym.Simp.SimpM (Sym.Simp.Result) := do
     let proof := mkApp (mkConst ``Std.Tactic.BVDecide.Normalize.Bool.beq_self_eq_true) lhs
     return .step (← mkLit true) proof
   else
+    trace[Meta.Tactic.bv] m!"{lhs} != {rhs}"
     let notSelf : Sym.Simp.SimpM (Option Sym.Simp.Result) := do
       let_expr Bool.not rhs := rhs | return none
       if lhs != rhs then return none

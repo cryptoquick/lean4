@@ -55,7 +55,7 @@ where
       | some ai =>
         if h : i - 1 < ai.size then
           let { isProof, isInstance } := ai[i - 1]
-          isProof || isInstance
+          isProof --|| isInstance
         else
           false  -- over-applied: no info, rewrite
       | none => false
