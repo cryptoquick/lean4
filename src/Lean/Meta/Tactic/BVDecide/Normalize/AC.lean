@@ -116,9 +116,9 @@ abbrev CoefficientsMap := Std.HashMap VarIndex Nat
 
 /-! ### VarState monadic boilerplate  -/
 
-abbrev VarStateM  := StateT VarState MetaM
+abbrev VarStateM  := StateT VarState Sym.SymM
 
-def VarStateM.run' (x : VarStateM α) (s : VarState) : MetaM α :=
+def VarStateM.run' (x : VarStateM α) (s : VarState) : Sym.SymM α :=
   StateT.run' x s
 
 /-! ### Implementation -/
@@ -300,7 +300,7 @@ def canonicalizeWithSharing (P : Expr) (lhs rhs : Expr) : Sym.Simp.SimpM Sym.Sim
     if oldExpr == newExpr then return .rfl
     let proof ← proveEqualityByAC oldExpr newExpr
 
-    return .step newExpr proof
+    return .step (← Sym.share newExpr) proof
 
 def bvAcNfpost : Sym.Simp.Simproc := fun e => withDoneResult do
   match_expr e with
