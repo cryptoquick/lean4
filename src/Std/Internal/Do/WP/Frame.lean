@@ -83,3 +83,35 @@ theorem WP.Frames.of_wp_conjunctive {Prog : Type u} {Value : Type v} {Pred : Typ
     intro a
     simp only [meet_apply]
     exact PartialOrder.rel_refl
+
+/-- Reinterpret a `WPMonad m` so its weakest precondition is the `PreservesSup.frameClosure` of the
+base wp over a family of `Sup`-preserving resource operators `op r` that act by `comp` with unit `e`.
+The resource frame rule then holds by construction (`WP.Frames.of_frameClosure`). -/
+@[instance_reducible] noncomputable def WPMonad.of_frameClosure {m : Type → Type} [Monad m]
+    {P : Type u} {E : Type z} [Assertion P] [Assertion E]
+    {R : Type} (op : R → P → P) [∀ r, PreservesSup (op r)] {comp : R → R → R} {e : R}
+    (hact : ∀ r r' a, op (comp r r') a = op r (op r' a)) (hunit : ∀ a, op e a = a)
+    (base : WPMonad m P E) : WPMonad m P E where
+  toLawfulMonad := base.toLawfulMonad
+  toWP _ :=
+    { wpTrans x := ⟨fun Q E' => PreservesSup.frameClosure op (fun Q' => WP.wp x Q' E') Q⟩
+      wp_trans_monotone x post post' epost epost' hE hP := by
+        simp only [PreservesSup.frameClosure]
+        refine CompleteLattice.iInf_mono fun r => PreservesSup.upperAdjoint_mono _ ?_
+        exact WP.wp_consequence_econs x _ _ epost epost'
+          (fun a => PreservesSup.map_mono (op r) (hP a)) hE }
+  pure_le_wp_pure x post E' := by
+    show post x ⊑ PreservesSup.frameClosure op (fun Q' => WP.wp (pure x) Q' E') post
+    refine (PreservesSup.le_frameClosure_iff op _).mpr fun r => ?_
+    exact base.pure_le_wp_pure x (fun a => op r (post a)) E'
+  bind_le_wp_bind x f post E' := by
+    show PreservesSup.frameClosure op (fun Q' => WP.wp x Q' E')
+          (fun a => PreservesSup.frameClosure op (fun Q' => WP.wp (f a) Q' E') post)
+        ⊑ PreservesSup.frameClosure op (fun Q' => WP.wp (x >>= f) Q' E') post
+    refine (PreservesSup.le_frameClosure_iff op _).mpr fun r => ?_
+    refine PartialOrder.rel_trans (PreservesSup.frameClosure_frames op comp hact _ _ r) ?_
+    refine PartialOrder.rel_trans (PreservesSup.frameClosure_le op e hunit _ _) ?_
+    refine PartialOrder.rel_trans ?_ (base.bind_le_wp_bind x f (fun a => op r (post a)) E')
+    refine WP.wp_consequence x _ _ E' fun a => ?_
+    exact PartialOrder.rel_trans (PreservesSup.frameClosure_frames op comp hact _ _ r)
+      (PreservesSup.frameClosure_le op e hunit _ _)

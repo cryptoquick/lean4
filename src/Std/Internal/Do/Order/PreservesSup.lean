@@ -117,6 +117,21 @@ theorem le_frameClosure {R : Type v} {β : Type w} (op : R → α → α) [∀ r
   (le_frameClosure_iff op k).mpr fun r =>
     PartialOrder.rel_trans (map_mono (op r) hpre) (hframe r Q)
 
+/-- A right adjoint is monotone. -/
+theorem upperAdjoint_mono (f : α → α) [PreservesSup f] {b b' : α} (h : b ⊑ b') :
+    upperAdjoint f b ⊑ upperAdjoint f b' :=
+  le_upperAdjoint f (PartialOrder.rel_trans (upperAdjoint_le f b) h)
+
+/-- The frame closure lies below the base transformer, witnessed at a unit resource `e` with
+`op e = id`. -/
+theorem frameClosure_le {R : Type v} {β : Type w} (op : R → α → α) [∀ r, PreservesSup (op r)]
+    (e : R) (hunit : ∀ a, op e a = a) (k : (β → α) → α) (Q : β → α) :
+    frameClosure op k Q ⊑ k Q := by
+  refine PartialOrder.rel_trans (iInf_le _ e) ?_
+  rw [show (fun a => op e (Q a)) = Q from funext fun a => hunit (Q a)]
+  have h := upperAdjoint_le (op e) (k Q)
+  rwa [hunit] at h
+
 end PreservesSup
 
 /-- Frame a single state coordinate: from the function-order premise `(fun u => ⌜u = s⌝ ⊓ pre) ⊑ Q`
