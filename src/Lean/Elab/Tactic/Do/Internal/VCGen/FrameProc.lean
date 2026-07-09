@@ -7,6 +7,7 @@ module
 
 prelude
 public import Lean.Meta.Sym.SymM
+public import Lean.Elab.Tactic.Do.Attr
 
 /-!
 The metadata a frame inference procedure operates on: the `wp` application metadata `WPInfo`, the
@@ -49,13 +50,16 @@ public def EPred (info : WPInfo) : Expr := info.args[3]!
 public def instWP (info : WPInfo) : Expr := info.args[6]!
 /-- Program expression classified by VCGen. -/
 public def prog (info : WPInfo) : Expr := info.args[7]!
+/-- Postcondition argument of `wp`. -/
+public def post (info : WPInfo) : Expr := info.args[8]!
 
 end VCGen.WPInfo
 
 /-- A frame inference procedure: given the resource type `R` of the applicable frame operator
-`op : R → Pred → Pred`, the goal's precondition, and the `wp` metadata of a spec-ready program,
-optionally produce a frame `F : R` to apply. -/
-public abbrev VCGen.FrameInferenceProc := Expr → Expr → VCGen.WPInfo → SymM (Option Expr)
+`op : R → Pred → Pred`, the goal's precondition, the `wp` metadata of a spec-ready program, and the
+`@[spec]` theorem selected for that program, optionally produce a frame `F : R` to apply. -/
+public abbrev VCGen.FrameInferenceProc :=
+  Expr → Expr → VCGen.WPInfo → SpecAttr.SpecTheorem → SymM (Option Expr)
 
 /-- A decomposition of a lattice operator on the RHS of an entailment `pre ⊑ op … s⃗`. A custom frame
 operator supplies its own split through its `@[frameproc]`, found by `splitLatticeOp?` via the

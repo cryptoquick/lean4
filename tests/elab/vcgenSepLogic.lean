@@ -230,7 +230,7 @@ theorem sepConj_frame_r {pre₀ F R : HProp} (h : pre₀ ⊑ R) : (pre₀ ∗ F)
 /-! ## The registered frame procedure for `∗` -/
 
 /-- No automatic frame inference yet: frames are supplied explicitly via the `frames` clause. -/
-def sepConjFrameProc : FrameInferenceProc := fun _R _pre _info => pure none
+def sepConjFrameProc : FrameInferenceProc := fun _R _pre _info _thm => pure none
 
 /-- The lattice split for `∗`: `pre ⊑ F ∗ R` is a bespoke backward rule (`sepConj_frame_r`) that
 cancels `F` from the precondition, leaving the residual `pre₀ ⊑ R`. -/

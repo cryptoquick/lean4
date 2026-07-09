@@ -170,6 +170,15 @@ public structure VCGen.State where
   -/
   latticeBackwardRuleCache : Std.HashMap (Name × Array ExprPtr × Nat) BackwardRule := {}
   /--
+  A cache mapping a frame operator to the `F`-abstract backward rule of the upper-adjoint frame
+  spec, whose first subgoal is the frame `F`. The rule depends on the operator's head constant, the
+  `WPMonad` instance, and the number of excess state arguments.
+
+  The instance is keyed by `ExprPtr`, so lookups compare it by pointer rather than structurally. This
+  is sound because the instance is a subterm of the hash-consed goal target.
+  -/
+  frameBackwardRuleCache : Std.HashMap (Name × ExprPtr × Nat) BackwardRule := {}
+  /--
   The frame database from the `frames` clause. The discrimination tree is fixed; a matched
   alternative is retired in place by setting `FrameEntry.retired`, so each applies at most once
   (first match wins) and a program whose alternative is retired is framed no further and reaches the
