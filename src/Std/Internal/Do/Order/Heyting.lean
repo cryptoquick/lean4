@@ -51,7 +51,7 @@ instance {σ : Type v} {β : σ → Type u} [∀ s, CompleteLattice (β s)]
       exact ⟨x t, ⟨x, hx, rfl⟩, by rw [← hgt, meet_apply]⟩
 
 /-- Heyting implication: the upper adjoint of the lattice meet. For `Prop` it is `→`. -/
-noncomputable def himp {α : Type u} [CompleteLattice α] (a b : α) : α :=
+@[expose] noncomputable def himp {α : Type u} [CompleteLattice α] (a b : α) : α :=
   PreservesSup.upperAdjoint (meet a) b
 
 @[inherit_doc himp] scoped infixr:60 " ⇨ " => himp
