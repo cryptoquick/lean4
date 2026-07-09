@@ -1101,6 +1101,48 @@ def bvAppend (α β lhs rhs : Expr) : Sym.Simp.SimpM (Sym.Simp.Result) := do
         (← mkEqRefl lstartExpr)
     return some <| .step (← Sym.share expr) proof
 
+  let appendConstLeft : Sym.Simp.SimpM (Option Sym.Simp.Result) := do
+    let_expr BitVec.ofNat _ a := lhs | return none
+    let_expr HAppend.hAppend rlhsTy rrhsTy _ _ rlhs rrhs := rhs | return none
+    let_expr BitVec w2Expr := rlhsTy | return none
+    let_expr BitVec w3Expr := rrhsTy | return none
+    let_expr BitVec.ofNat _ b := rlhs | return none
+    let some w1 ← getNatValue? wlhs | return none
+    let some w2 ← getNatValue? w2Expr | return none
+    let some w3 ← getNatValue? w3Expr | return none
+    let w1w2 ← mkLit (w1 + w2)
+    let inner1 ← BitVec.mkAppend lhs rlhs wlhs w2Expr w1w2
+    let resWidth ← mkLit (w1 + w2 + w3)
+    let inner2 ← BitVec.mkAppend inner1 rrhs w1w2 w3Expr resWidth
+    let h := mkApp3 (mkConst ``Nat.add_assoc) wlhs w2Expr w3Expr
+    let expr := mkApp4 (mkConst ``BitVec.cast) resWidth resWidth h inner2
+    let proof :=
+      mkApp6 (mkConst ``Std.Tactic.BVDecide.Normalize.BitVec.append_const_left)
+        w3Expr wlhs a w2Expr b rrhs
+    return some <| .step (← Sym.share expr) proof
+
+  let appendConstRight : Sym.Simp.SimpM (Option Sym.Simp.Result) := do
+    let_expr BitVec.ofNat _ c := rhs | return none
+    let_expr HAppend.hAppend llhsTy lrhsTy _ _ llhs lrhs := lhs | return none
+    let_expr BitVec w1Expr := llhsTy | return none
+    let_expr BitVec w2Expr := lrhsTy | return none
+    let_expr BitVec.ofNat _ b := lrhs | return none
+    let some w1 ← getNatValue? w1Expr | return none
+    let some w2 ← getNatValue? w2Expr | return none
+    let some w3 ← getNatValue? wrhs | return none
+    let w2w3 ← mkLit (w2 + w3)
+    let inner1 ← BitVec.mkAppend lrhs rhs w2Expr wrhs w2w3
+    let resWidth ← mkLit (w1 + w2 + w3)
+    let inner2 ← BitVec.mkAppend llhs inner1 w1Expr w2w3 resWidth
+    let h :=
+      mkApp4 (mkConst ``Eq.symm [1]) (mkConst ``Nat) resWidth resWidth
+        (mkApp3 (mkConst ``Nat.add_assoc) w1Expr w2Expr wrhs)
+    let expr := mkApp4 (mkConst ``BitVec.cast) resWidth resWidth h inner2
+    let proof :=
+      mkApp6 (mkConst ``Std.Tactic.BVDecide.Normalize.BitVec.append_const_right)
+        w1Expr w2Expr b wrhs c llhs
+    return some <| .step (← Sym.share expr) proof
+
   let appendZeroWidth : Sym.Simp.SimpM (Option Sym.Simp.Result) := do
     let some 0 ← getNatValue? wrhs | return none
     let proof := mkApp3 (mkConst ``BitVec.append_zero_width) wlhs lhs rhs
@@ -1115,6 +1157,8 @@ def bvAppend (α β lhs rhs : Expr) : Sym.Simp.SimpM (Sym.Simp.Result) := do
 
   if let some step ← concatExtract then return step
   if let some step ← concatNotExtract then return step
+  if let some step ← appendConstLeft then return step
+  if let some step ← appendConstRight then return step
   if let some step ← appendZeroWidth then return step
   if let some step ← zeroWidthAppend then return step
   return .rfl

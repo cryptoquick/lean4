@@ -416,8 +416,6 @@ theorem BitVec.and_const_right' {a : BitVec w} :
     (a &&& BitVec.ofNat w b) &&& BitVec.ofNat w c = (BitVec.ofNat w b &&& BitVec.ofNat w c) &&& a := by
   ac_rfl
 
--- Explicit no_index so this theorem works in the presence of constant folding if w1/w2/w3 are fixed
-@[bv_normalize]
 theorem BitVec.append_const_left {c : BitVec w3} :
     HAppend.hAppend (β := BitVec (no_index _)) (γ := BitVec (no_index _))
       (BitVec.ofNat w1 a)
@@ -426,7 +424,6 @@ theorem BitVec.append_const_left {c : BitVec w3} :
   rw [BitVec.append_assoc]
   simp
 
-@[bv_normalize]
 theorem BitVec.append_const_right {a : BitVec w1} :
     HAppend.hAppend (α := BitVec (no_index _)) (γ := BitVec (no_index _))
       (HAppend.hAppend (γ := BitVec (no_index _)) a (BitVec.ofNat w2 b))
