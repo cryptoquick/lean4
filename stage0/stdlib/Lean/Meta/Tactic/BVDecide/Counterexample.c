@@ -1005,9 +1005,9 @@ goto v___jp_82_;
 v___jp_71_:
 {
 lean_object* v___x_75_; lean_object* v___x_77_; 
-v___x_75_ = lean_nat_add(v___y_73_, v___y_74_);
+v___x_75_ = lean_nat_add(v___y_72_, v___y_74_);
 lean_dec(v___y_74_);
-lean_dec(v___y_73_);
+lean_dec(v___y_72_);
 if (v_isShared_68_ == 0)
 {
 lean_ctor_set(v___x_67_, 4, v_r_45_);
@@ -1036,7 +1036,7 @@ lean_object* v___x_79_;
 if (v_isShared_56_ == 0)
 {
 lean_ctor_set(v___x_55_, 4, v___x_77_);
-lean_ctor_set(v___x_55_, 3, v___y_72_);
+lean_ctor_set(v___x_55_, 3, v___y_73_);
 lean_ctor_set(v___x_55_, 2, v_v_59_);
 lean_ctor_set(v___x_55_, 1, v_k_58_);
 lean_ctor_set(v___x_55_, 0, v___x_70_);
@@ -1050,7 +1050,7 @@ v_reuseFailAlloc_80_ = lean_alloc_ctor(0, 5, 0);
 lean_ctor_set(v_reuseFailAlloc_80_, 0, v___x_70_);
 lean_ctor_set(v_reuseFailAlloc_80_, 1, v_k_58_);
 lean_ctor_set(v_reuseFailAlloc_80_, 2, v_v_59_);
-lean_ctor_set(v_reuseFailAlloc_80_, 3, v___y_72_);
+lean_ctor_set(v_reuseFailAlloc_80_, 3, v___y_73_);
 lean_ctor_set(v_reuseFailAlloc_80_, 4, v___x_77_);
 v___x_79_ = v_reuseFailAlloc_80_;
 goto v_reusejp_78_;
@@ -1095,8 +1095,8 @@ if (lean_obj_tag(v_r_61_) == 0)
 lean_object* v_size_88_; 
 v_size_88_ = lean_ctor_get(v_r_61_, 0);
 lean_inc(v_size_88_);
-v___y_72_ = v___x_86_;
-v___y_73_ = v___x_87_;
+v___y_72_ = v___x_87_;
+v___y_73_ = v___x_86_;
 v___y_74_ = v_size_88_;
 goto v___jp_71_;
 }
@@ -1104,8 +1104,8 @@ else
 {
 lean_object* v___x_89_; 
 v___x_89_ = lean_unsigned_to_nat(0u);
-v___y_72_ = v___x_86_;
-v___y_73_ = v___x_87_;
+v___y_72_ = v___x_87_;
+v___y_73_ = v___x_86_;
 v___y_74_ = v___x_89_;
 goto v___jp_71_;
 }
@@ -3264,7 +3264,7 @@ _start:
 lean_object* v___x_720_; lean_object* v___x_721_; lean_object* v___x_722_; lean_object* v___x_723_; lean_object* v___x_724_; lean_object* v___x_725_; 
 v___x_720_ = ((lean_object*)(l_List_forIn_x27_loop___at___00Lean_Meta_Tactic_BVDecide_reconstructCounterExample_spec__3___redArg___closed__2));
 v___x_721_ = lean_unsigned_to_nat(6u);
-v___x_722_ = lean_unsigned_to_nat(69u);
+v___x_722_ = lean_unsigned_to_nat(67u);
 v___x_723_ = ((lean_object*)(l_List_forIn_x27_loop___at___00Lean_Meta_Tactic_BVDecide_reconstructCounterExample_spec__3___redArg___closed__1));
 v___x_724_ = ((lean_object*)(l_List_forIn_x27_loop___at___00Lean_Meta_Tactic_BVDecide_reconstructCounterExample_spec__3___redArg___closed__0));
 v___x_725_ = l_mkPanicMessageWithDecl(v___x_724_, v___x_723_, v___x_722_, v___x_721_, v___x_720_);
@@ -6462,7 +6462,7 @@ _start:
 lean_object* v___x_1994_; lean_object* v___x_1995_; lean_object* v___x_1996_; lean_object* v___x_1997_; lean_object* v___x_1998_; lean_object* v___x_1999_; 
 v___x_1994_ = ((lean_object*)(l___private_Lean_Meta_Tactic_BVDecide_Counterexample_0__Lean_Meta_Tactic_BVDecide_DiagnosisM_diagnose_transformEquation___closed__5));
 v___x_1995_ = lean_unsigned_to_nat(61u);
-v___x_1996_ = lean_unsigned_to_nat(221u);
+v___x_1996_ = lean_unsigned_to_nat(219u);
 v___x_1997_ = ((lean_object*)(l___private_Lean_Meta_Tactic_BVDecide_Counterexample_0__Lean_Meta_Tactic_BVDecide_DiagnosisM_diagnose_transformEquation___closed__4));
 v___x_1998_ = ((lean_object*)(l_List_forIn_x27_loop___at___00Lean_Meta_Tactic_BVDecide_reconstructCounterExample_spec__3___redArg___closed__0));
 v___x_1999_ = l_mkPanicMessageWithDecl(v___x_1998_, v___x_1997_, v___x_1996_, v___x_1995_, v___x_1994_);
