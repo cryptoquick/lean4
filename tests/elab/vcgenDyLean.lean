@@ -385,10 +385,10 @@ public meta def dyLeanFrameProc : FrameInferenceProc := fun _R pre _info => do
 
 @[frameproc] public meta def dyLeanFP : FrameProc where
   prog := ``Traceful
-  proc := dyLeanFrameProc
-  conj := ``Lean.Order.meet
-  op := fun info => Meta.mkAppOptM ``Lean.Order.meet #[info.Pred, none]
+  op := ``Lean.Order.meet
+  mkOpAppM := fun info => Meta.mkAppOptM ``Lean.Order.meet #[info.Pred, none]
   split := LatticeSplit.meet
+  proc := dyLeanFrameProc
 end DyLeanFrameProc
 
 variable [ExecTraceTypes]
