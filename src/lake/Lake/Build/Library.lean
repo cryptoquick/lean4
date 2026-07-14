@@ -154,6 +154,100 @@ def LeanLib.recBuildShared (self : LeanLib) : FetchM (Job Dynlib) := do
 public def LeanLib.sharedFacetConfig : LibraryFacetConfig sharedFacet :=
   mkFacetJobConfig LeanLib.recBuildShared
 
+/-! ## Build Freestanding Static Packaging -/
+
+/--
+Resolve a `needs` key to a freestanding `LeanLib` in the workspace, if any.
+
+Supports package-local and cross-package target keys (optionally with a
+`freestanding`, `freestanding.bundle`, or `static` facet). Non-library targets
+(`lean_exe`, custom targets, etc.) yield `none` so ordinary non-library `needs`
+edges remain free of freestanding packaging.
+
+Fail-closed: a `needs` key that names a `lean_lib` which is **not** freestanding
+is an error (do not silently drop a misconfigured prelude from the link list).
+-/
+def LeanLib.resolveFreestandingNeed?
+  (defaultPkg : Package) (key : PartialBuildKey) : FetchM (Option LeanLib)
+:= do
+  let targetKey? : Option PartialBuildKey :=
+    match key with
+    | .facet t f =>
+      if f.isAnonymous || f == `freestanding || f == `freestanding.bundle || f == `static then
+        some t
+      else none
+    | t => some t
+  let some targetKey := targetKey? | return none
+  let .packageTarget pkgName target := targetKey | return none
+  let pkg? ←
+    match pkgName with
+    | .anonymous => pure (some defaultPkg)
+    | .num .. => pure ((← findPackageByKey? pkgName).map (·.toPackage))
+    | _ => findPackageByName? pkgName
+  let some pkg := pkg? | return none
+  let some lib := pkg.findLeanLib? target | return none
+  unless lib.isFreestanding do
+    error s!"freestanding packaging: needs lean_lib '{lib.name}' is not freestanding \
+      (set `freestanding := true` on that lean_lib, or remove it from freestanding needs)"
+  return some lib
+
+/-- Keep first occurrence of each path (diamond freestanding graphs). -/
+private def freestandingLinkPathsUnique (paths : Array FilePath) : Array FilePath :=
+  paths.foldl (init := #[]) fun acc p =>
+    if acc.any (·.toString == p.toString) then acc else acc.push p
+
+/--
+Build freestanding static packaging for a library.
+
+Produces the ordered list of static archives a C consumer should link:
+this library's static archive first, then freestanding `needs` deps (each
+already expanded), with first-seen dedup for diamond graphs.
+Never injects `leanSharedDynlibs`.
+
+Prefer `freestanding.bundle` when the consumer wants a single archive path.
+-/
+def LeanLib.recBuildFreestanding (self : LeanLib) : FetchM (Job (Array FilePath)) := do
+  withRegisterJob s!"{self.name}:freestanding" <| withCurrPackage self.pkg do
+  unless self.isFreestanding do
+    error s!"{self.name}:freestanding: library is not freestanding \
+      (set `freestanding := true` on the lean_lib)"
+  let ownJob ← self.static.fetch
+  let mut depJobs : Array (Job (Array FilePath)) := #[]
+  for key in self.config.needs do
+    if let some dep ← LeanLib.resolveFreestandingNeed? self.pkg key then
+      -- Avoid self-cycles if a lib lists itself.
+      unless dep.name == self.name && dep.pkg.keyName == self.pkg.keyName do
+        depJobs := depJobs.push (← dep.freestanding.fetch)
+  let depsJob := Job.collectArray depJobs "freestandingDeps"
+  return ownJob.zipWith (fun own deps => freestandingLinkPathsUnique (#[own] ++ deps.flatten)) depsJob
+
+/-- The `LibraryFacetConfig` for the builtin `freestandingFacet`. -/
+public def LeanLib.freestandingFacetConfig : LibraryFacetConfig freestandingFacet :=
+  mkFacetJobConfig LeanLib.recBuildFreestanding
+
+/--
+Build a single combined freestanding static archive for a library.
+
+Fetches `freestanding` (ordered multi-archive set with the same fail-closed
+`needs` policy) and repacks those archives into `lib{name}_bundle.a`.
+-/
+def LeanLib.recBuildFreestandingBundle (self : LeanLib) : FetchM (Job FilePath) := do
+  withRegisterJob s!"{self.name}:freestanding.bundle" <| withCurrPackage self.pkg do
+  unless self.isFreestanding do
+    error s!"{self.name}:freestanding.bundle: library is not freestanding \
+      (set `freestanding := true` on the lean_lib)"
+  let pathsJob ← self.freestanding.fetch
+  pathsJob.mapM fun paths => do
+    addPlatformTrace
+    let libFile := self.freestandingBundleLibFile
+    let art ← buildArtifactUnlessUpToDate libFile (ext := "a") (restore := true) do
+      combineStaticLibs libFile paths (← getLeanAr)
+    return art.path
+
+/-- The `LibraryFacetConfig` for the builtin `freestandingBundleFacet`. -/
+public def LeanLib.freestandingBundleFacetConfig : LibraryFacetConfig freestandingBundleFacet :=
+  mkFacetJobConfig LeanLib.recBuildFreestandingBundle
+
 /-! ## Other -/
 
 /--
@@ -183,7 +277,8 @@ public def LeanLib.defaultFacetConfig : LibraryFacetConfig defaultFacet :=
 
 /--
 A name-configuration map for the initial set of
-Lean library facets (e.g., `lean`, `static`, `shared`).
+Lean library facets (e.g., `lean`, `static`, `shared`, `freestanding`,
+`freestanding.bundle`).
 -/
 public def LeanLib.initFacetConfigs : DNameMap LeanLibFacetConfig :=
   DNameMap.empty
@@ -193,6 +288,8 @@ public def LeanLib.initFacetConfigs : DNameMap LeanLibFacetConfig :=
   |>.insert staticFacet staticFacetConfig
   |>.insert staticExportFacet staticExportFacetConfig
   |>.insert sharedFacet sharedFacetConfig
+  |>.insert freestandingFacet freestandingFacetConfig
+  |>.insert freestandingBundleFacet freestandingBundleFacetConfig
   |>.insert extraDepFacet extraDepFacetConfig
 
 @[inherit_doc LeanLib.initFacetConfigs]

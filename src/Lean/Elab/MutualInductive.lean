@@ -16,6 +16,7 @@ import Lean.Meta.Constructions.CtorIdx
 import Lean.Meta.Constructions.CtorElim
 import Lean.Meta.IndPredBelow
 import Lean.Meta.Injective
+import Lean.Compiler.Options
 import Init.Data.List.MapIdx
 import Init.Omega
 
@@ -1546,9 +1547,17 @@ private def mkAuxConstructions (declNames : Array Name) : TermElabM Unit := do
   let hasUnit := env.contains ``PUnit
   let hasProd := env.contains ``Prod
   let hasNat  := env.contains ``Nat
+  -- Freestanding extracts cannot define root `PUnit` (host import collides with Init.PUnit),
+  -- but still need `.casesOn` for unboxed Bool branches (S7 / N7). `mkCasesOn` itself does not
+  -- require `PUnit` — the gate is only historical for the Init bootstrap order.
+  -- Gate on the elab-time option (not the persisted module bit): the bit is set from the same
+  -- option when compiling freestanding extracts, and aux construction runs at elab. Host default
+  -- remains `false` (non-regression). Any module compiled with the option gets `.casesOn` without
+  -- `PUnit` — intentional, slightly broader than "extract-only".
+  let genCasesOn := hasUnit || Compiler.compiler.freestanding.get (← getOptions)
   for n in declNames do
     mkRecOn n
-    if hasUnit then mkCasesOn n
+    if genCasesOn then mkCasesOn n
     if hasNat then mkCtorIdx n
     if hasNat then mkCtorElim n
     if hasUnit && hasEq && hasHEq then mkNoConfusion n

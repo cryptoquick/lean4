@@ -8,6 +8,7 @@ module
 prelude
 public import Lean.Compiler.LCNF.Irrelevant
 import Lean.Compiler.LCNF.MonoTypes
+import Lean.Compiler.Freestanding
 import Init.Data.Format.Macro
 
 namespace Lean.Compiler.LCNF
@@ -61,6 +62,13 @@ IR representations that are fixed independently of the environment: builtin scal
 compiler's pseudo-constants (`lcErased`/`lcVoid`, which are not inductives). These never need to be
 persisted in `impureTypeExt`.
 -/
+def freestandingScalarKindToImpureType : Compiler.FreestandingScalarKind → Expr
+  | .uint8 => ImpureType.uint8
+  | .uint16 => ImpureType.uint16
+  | .uint32 => ImpureType.uint32
+  | .uint64 => ImpureType.uint64
+  | .usize => ImpureType.usize
+
 def builtinImpureType? : Name → Option Expr
   | ``UInt8 => some ImpureType.uint8
   | ``UInt16 => some ImpureType.uint16
@@ -74,7 +82,9 @@ def builtinImpureType? : Name → Option Expr
   -- but it has the same runtime representation as `Nat` and thus needs to be special-cased here.
   | ``Int => some ImpureType.tobject
   | ``lcVoid => some ImpureType.void
-  | _ => none
+  | n =>
+    -- K18: parallel freestanding scalars map to the same impure scalar kinds as host UInt*
+    freestandingScalarKind? n |>.map freestandingScalarKindToImpureType
 
 /--
 Computes the IR (impure) type of `name` from scratch by inspecting its constructors. For inductives

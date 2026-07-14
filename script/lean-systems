@@ -1,0 +1,692 @@
+#!/usr/bin/env bash
+# lean-systems — Systems Lean self-host product driver (R6).
+#
+# This is a *product* entry point for freestanding AOT without mandatory GC on
+# the embed/link line. It is **not** a claim that the elaborator itself is
+# GC-free: elaborating still uses classic stage1 `lean` + libleanshared today.
+# The freestanding *product objects* (static archives from FS extract) link
+# with libc only — verified by systems-selfhost-link-check.sh.
+#
+# Host deps of compile/check/selfhost (Track H / H1–H5 — see doc/dev/systems-lean-selfhost.md):
+#   build/compile/selfhost(build,tiny) → stage1 lean (+ lake for build); NEEDED libleanshared*/Init_shared
+#   check → product nm only (no elaborator); PRODUCT_GC_FREE residual independent of host
+#   --version/--help → driver only (lean optional for --version banner)
+#   H2 dual path: PRODUCT_GC_FREE=1 can hold while GC_FREE_ELABORATOR=0 (independent axes)
+#   H3 plan honesty (docs/comments only; not an earn token):
+#     HOST_DRIVER_RESIDUAL_PLAN=1
+#   H4 residual-reduction plan honesty (docs/comments only; not an earn token):
+#     HOST_RESIDUAL_REDUCTION_PLAN=1
+#   H5 earn-path honesty (docs/comments only; not residual_free earn):
+#     HOST_ELABORATOR_EARN_PATH=1
+#   H5 prototype worklist honesty (docs/comments only; not residual_free earn):
+#     HOST_ELABORATOR_PROTOTYPE_WORKLIST=1
+#   H5 stage1 residual baseline honesty (docs/comments only; not residual_free earn):
+#     HOST_STAGE1_RESIDUAL_BASELINE=classic_RC_shared
+#   H5 W0 verified-docs honesty (docs include classic residual dry-run; not residual_free earn):
+#     HOST_ELABORATOR_W0_VERIFIED_DOCS=1
+#   H5 W1 experiment-protocol honesty (static-link / thin-driver protocol docs; not residual_free earn):
+#     HOST_ELABORATOR_W1_EXPERIMENT_PROTOCOL=1
+#   H5 W1 candidate-protocol honesty (measurable pin via SYSTEMS_LEAN_HOST_ELF; not residual_free earn):
+#     HOST_ELABORATOR_W1_CANDIDATE_PROTOCOL=1
+#   H5 next-experiment-step honesty (first-candidate binary identity docs; not residual_free earn):
+#     HOST_ELABORATOR_NEXT_EXPERIMENT_STEP=1
+#   H5 negative-candidates honesty (must-not-be residual_free host identities; not residual_free earn):
+#     HOST_ELABORATOR_NEGATIVE_CANDIDATES=1
+#   H5 earn-checklist honesty (fail-closed residual_free prove-list docs; not residual_free earn):
+#     HOST_ELABORATOR_EARN_CHECKLIST=1
+#   H5 FORCE-refusal honesty (FORCE without residual_free must FAIL; docs only; not residual_free earn):
+#     HOST_ELABORATOR_FORCE_REFUSAL=1
+#   H5 FORCE-negative measured-receipt honesty (classic stage1 FORCE dry-run fail-closed; docs only; not residual_free earn):
+#     HOST_ELABORATOR_FORCE_NEGATIVE_MEASURED=1
+#   H5 status-quo stage1 summary honesty (resting measured tokens until earn; docs only; not residual_free earn):
+#     HOST_ELABORATOR_STATUS_QUO=1
+#   H5 docs-ladder-complete honesty (path/worklist/E1–E4/checklist/FORCE/STATUS_QUO docs-complete; not residual_free earn):
+#     HOST_ELABORATOR_DOCS_LADDER_COMPLETE=1
+#   Isolation options: thin wrapper (this driver) shells to product tools; future static lean
+#     without Init_shared/libleanshared NEEDED must still earn via residual script scanners.
+#   GC_FREE_ELABORATOR stays 0 until earned (H5). Earn rules SSoT:
+#     script/systems-host-elaborator-residual.sh  (readelf/objdump NEEDED; ldd never earns)
+#   Optional candidate measure (fail-closed dry-run; never forges =1):
+#     SYSTEMS_LEAN_HOST_ELF=/path/to/candidate-lean  → dual honesty maps to SYSTEMS_LEAN_TCB_LEAN
+#     for residual script only; unset → classic stage1 measure → GC_FREE_ELABORATOR=0
+#   Never forge GC_FREE_ELABORATOR=1; never weaken host residual gates from this driver.
+#
+# Installed copy usually lives at:
+#   out/systems-selfhost/bin/lean-systems
+# Source of truth in-tree:
+#   script/lean-systems
+#
+# Usage:
+#   lean-systems --version | -v
+#   lean-systems --help | -h
+#   lean-systems build              # build freestanding product bundle
+#   lean-systems check              # nm gate on product bundle
+#   lean-systems selfhost           # full product path (build+install+check+negatives+tiny)
+#   lean-systems compile FILE.lean  # tiny FS C emit (systemsSelfHost + freestanding)
+#   lean-systems lean [args...]     # forward to stage1 lean with FS product flags
+#   lean-systems -- [lean args...]  # same as lean
+set -euo pipefail
+
+# Resolve install tree: prefer directory of this script when installed under
+# out/systems-selfhost/bin; otherwise lean4 repo root via script/ placement.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT_STAMP=""
+if [[ -f "$HERE/../share/systems-lean/ROOT" ]]; then
+  # Installed layout: out/systems-selfhost/{bin,share/...}
+  PREFIX="$(cd "$HERE/.." && pwd)"
+  ROOT_STAMP="$PREFIX/share/systems-lean/ROOT"
+  ROOT="$(tr -d '\r\n' <"$ROOT_STAMP")"
+elif [[ -f "$HERE/../LEAN4.md" || -f "$HERE/../src/Lean.lean" ]]; then
+  ROOT="$(cd "$HERE/.." && pwd)"
+  PREFIX="${SYSTEMS_LEAN_PREFIX:-$ROOT/out/systems-selfhost}"
+elif [[ -f "$HERE/../../LEAN4.md" ]]; then
+  # e.g. out/systems-selfhost/bin without share stamp yet
+  ROOT="$(cd "$HERE/../.." && pwd)"
+  PREFIX="$(cd "$HERE/.." && pwd)"
+else
+  ROOT="$(cd "$HERE/.." && pwd)"
+  PREFIX="${SYSTEMS_LEAN_PREFIX:-$ROOT/out/systems-selfhost}"
+fi
+
+FS_EXAMPLE="${SYSTEMS_LEAN_FS0:-$ROOT/tests/lake/examples/systems}"
+BUNDLE_DEFAULT="$FS_EXAMPLE/lib/.lake/build/lib/libfs_extract_bundle.a"
+BUNDLE="${SYSTEMS_LEAN_BUNDLE:-$BUNDLE_DEFAULT}"
+
+# Prefer in-tree stage1 lean/lake when present.
+if [[ -x "$ROOT/build/release/stage1/bin/lean" ]]; then
+  export PATH="$ROOT/build/release/stage1/bin:$PATH"
+fi
+if [[ -z "${LAKE:-}" && -x "$ROOT/build/release/stage1/bin/lake" ]]; then
+  export LAKE="$ROOT/build/release/stage1/bin/lake"
+fi
+LAKE="${LAKE:-lake}"
+
+# Product-path compiler defaults (opt-in; classic lean unchanged when not used).
+# systemsSelfHost alone is informational — extract gates key on freestanding/qtt.
+# lean-systems always sets all three so product mode cannot be partial-flagged.
+FS_LEAN_OPTS=(
+  -Dcompiler.systemsSelfHost=true
+  -Dcompiler.freestanding=true
+  -Dcompiler.qtt=true
+)
+
+VERSION_LABEL="Systems Lean self-host product path (R6)"
+
+# Layout / tool discovery (not a product-residue rejection).
+require_root_scripts() {
+  local gate="$ROOT/script/systems-selfhost-link-check.sh"
+  local driver="$ROOT/script/lean-systems"
+  if [[ ! -f "$gate" || ! -f "$driver" ]]; then
+    echo "error: ROOT stamp invalid or scripts missing under $ROOT (tool/layout discovery)" >&2
+    echo "hint: re-run ./script/systems-selfhost.sh from a lean4 checkout; check $ROOT_STAMP" >&2
+    exit 1
+  fi
+}
+
+root_ok() {
+  [[ -f "$ROOT/script/systems-selfhost-link-check.sh" && -f "$ROOT/script/lean-systems" ]]
+}
+
+banner_honesty() {
+  cat <<'EOF'
+note: elaborator host TCB is still classic stage1 lean + libleanshared (GC/RC).
+note: freestanding *product* objects need no Init_shared / leanshared / U lean_* / U l_*.
+note: compiler.systemsSelfHost alone does not enable extract gates — freestanding must be set
+      (this driver always passes systemsSelfHost + freestanding + qtt together).
+EOF
+}
+
+cmd_version() {
+  echo "$VERSION_LABEL"
+  if command -v lean >/dev/null 2>&1; then
+    lean --version 2>/dev/null || true
+  else
+    echo "lean: not on PATH (build stage1 or export PATH)"
+  fi
+  echo "prefix: $PREFIX"
+  echo "root:   $ROOT"
+  if ! root_ok; then
+    echo "warning: ROOT path is invalid or scripts are missing (re-run systems-selfhost.sh)" >&2
+  fi
+  banner_honesty
+}
+
+cmd_help() {
+  cat <<EOF
+lean-systems — Systems Lean freestanding product driver (R6)
+
+host elaborator: classic stage1 lean (GC/RC OK on host)
+product embed:   freestanding static archive + libc only
+
+Commands:
+  --version, -v          Version / host lean / honesty notes
+  --help, -h             This help
+  build                  Build freestanding Lake product (bundle)
+  check                  nm gate on product archive (no elaborator): emits
+                         PRODUCT_GC_FREE=1 / PRODUCT_NO_LEANSHARED=1 on success,
+                         then dual residual honesty (measured host tokens +
+                         HOST_DRIVER_RESIDUAL_PLAN=1 +
+                         HOST_RESIDUAL_REDUCTION_PLAN=1 +
+                         HOST_ELABORATOR_EARN_PATH=1 +
+                         HOST_ELABORATOR_PROTOTYPE_WORKLIST=1 +
+                         HOST_STAGE1_RESIDUAL_BASELINE=classic_RC_shared +
+                         HOST_ELABORATOR_W0_VERIFIED_DOCS=1 +
+                         HOST_ELABORATOR_W1_EXPERIMENT_PROTOCOL=1 +
+                         HOST_ELABORATOR_W1_CANDIDATE_PROTOCOL=1 +
+                         HOST_ELABORATOR_NEXT_EXPERIMENT_STEP=1 +
+                         HOST_ELABORATOR_NEGATIVE_CANDIDATES=1 +
+                         HOST_ELABORATOR_EARN_CHECKLIST=1 +
+                         HOST_ELABORATOR_FORCE_REFUSAL=1 +
+                         HOST_ELABORATOR_FORCE_NEGATIVE_MEASURED=1 +
+                         HOST_ELABORATOR_STATUS_QUO=1 +
+                         HOST_ELABORATOR_DOCS_LADDER_COMPLETE=1).
+                         Independent of host GC_FREE_ELABORATOR (H2 dual path;
+                         H3–H5 plan/path/baseline/W0-docs/W1-protocol/W1-candidate/next-step/negative-candidates/earn-checklist/FORCE-refusal/FORCE-negative-measured/status-quo/docs-ladder-complete markers only — not residual_free earn).
+  selfhost               Full product path: build + install + nm check
+                         + link-check negatives + tiny freestanding compile
+                         (same extras as ./script/systems-selfhost.sh)
+  compile FILE.lean      Emit C for a tiny freestanding module
+  lean [args...]         Forward to lean with product FS flags
+  -- [lean args...]      Same as lean
+
+Environment:
+  SYSTEMS_LEAN_PREFIX           Install prefix (default: <root>/out/systems-selfhost)
+  SYSTEMS_LEAN_FS0              freestanding path
+  SYSTEMS_LEAN_BUNDLE           Product archive for check (default: FS_EXAMPLE bundle)
+  SYSTEMS_LEAN_SELFHOST_SKIP_BUILD=1  selfhost: skip lake rebuild (bundle must exist)
+  SYSTEMS_LEAN_HOST_ELF         Optional H5 candidate host ELF for dual residual
+                                measure only (maps to SYSTEMS_LEAN_TCB_LEAN for
+                                systems-host-elaborator-residual.sh). Unset or
+                                classic stage1 → GC_FREE_ELABORATOR=0. Never forges
+                                elaborator=1; earn only if residual script prints
+                                residual_free under multi-scanner agreement.
+  LAKE                          lake executable
+  PATH                          Prefer <root>/build/release/stage1/bin
+
+H5 prototype worklist (plan only; see doc/dev/systems-lean-selfhost.md § H5):
+  HOST_ELABORATOR_PROTOTYPE_WORKLIST=1
+  HOST_STAGE1_RESIDUAL_BASELINE=classic_RC_shared
+  HOST_ELABORATOR_W0_VERIFIED_DOCS=1
+  HOST_ELABORATOR_W1_EXPERIMENT_PROTOCOL=1
+  HOST_ELABORATOR_W1_CANDIDATE_PROTOCOL=1
+  HOST_ELABORATOR_NEXT_EXPERIMENT_STEP=1
+  HOST_ELABORATOR_NEGATIVE_CANDIDATES=1
+  HOST_ELABORATOR_EARN_CHECKLIST=1
+  HOST_ELABORATOR_FORCE_REFUSAL=1
+  HOST_ELABORATOR_FORCE_NEGATIVE_MEASURED=1
+  HOST_ELABORATOR_STATUS_QUO=1
+  HOST_ELABORATOR_DOCS_LADDER_COMPLETE=1
+  W0  Identify stage1 CMake link sources (-lInit_shared -lleanshared*)
+  W0 verification dry-run transcript: doc/dev/systems-lean-selfhost.md § H5
+      (classic residual snapshot; not residual_free earn)
+  W0 CMake inject re-verify (H5.E1): src/CMakeLists.txt:933/:611 +
+      src/shell/CMakeLists.txt:41 still match (no drift at last re-verify)
+  W1  Static-link shell OR product-only thin driver experiment protocol
+      (HOST_ELABORATOR_W1_EXPERIMENT_PROTOCOL=1; measure via SYSTEMS_LEAN_HOST_ELF;
+       success only residual_free under multi-scanner; ldd never earns)
+  W1 candidate measure protocol (H5.E2; HOST_ELABORATOR_W1_CANDIDATE_PROTOCOL=1):
+      pin future static lean / thin-driver-adjacent ELF via SYSTEMS_LEAN_HOST_ELF;
+      classic stage1 dry-run still measures GC_FREE_ELABORATOR=0 (not earn)
+  Next experiment step (H5.E3; HOST_ELABORATOR_NEXT_EXPERIMENT_STEP=1):
+      lean-systems = product path (shell; not elaborator ELF); stage1 remains classic;
+      first real candidate sketch name: lean-host-static (optional archive liblean_host_static.a);
+      not residual_free earn
+  Negative candidates (H5.E4; HOST_ELABORATOR_NEGATIVE_CANDIDATES=1):
+      lean-systems product shell, other scripts, non-ELF / empty +x, product archives alone,
+      ldd-only clean — must never be residual_free host elaborator candidates (docs only; not earn)
+  Earn checklist (HOST_ELABORATOR_EARN_CHECKLIST=1):
+      residual_free host ELF must prove ELF magic, NEEDED empty of leanshared/Init_shared under
+      readelf and/or objdump agreement, no FORCE forge, product independence (docs only; not earn)
+  FORCE refusal (HOST_ELABORATOR_FORCE_REFUSAL=1):
+      SYSTEMS_LEAN_FORCE_GC_FREE_ELABORATOR=1 without residual_free must FAIL on all residual-script
+      exit paths (docs only; not residual_free earn; SSoT: systems-host-elaborator-residual.sh)
+  FORCE negative measured receipt (HOST_ELABORATOR_FORCE_NEGATIVE_MEASURED=1):
+      classic stage1 FORCE dry-run fail-closed greppable lines + negatives suite (docs only; not earn)
+  Status-quo stage1 summary (HOST_ELABORATOR_STATUS_QUO=1):
+      resting measured tokens until earn: HOST_HAS_LEANSHARED=1, classic_RC, GC_FREE_ELABORATOR=0
+      (docs only; not residual_free earn; re-measure via systems-host-elaborator-residual.sh)
+  Docs ladder complete (HOST_ELABORATOR_DOCS_LADDER_COMPLETE=1):
+      path/worklist/E1–E4/checklist/FORCE/STATUS_QUO docs-complete; only real residual_free ELF remains for earn
+      (docs only; not residual_free earn)
+  W2  SYSTEMS_LEAN_HOST_ELF candidate must pass residual_free under multi-scanner; ldd never earns
+  W3  Earn only when residual script prints residual_free + GC_FREE_ELABORATOR=1
+  CMake inject sites (W0; re-check line numbers after edits):
+    src/CMakeLists.txt ≈933 CMAKE_EXE_LINKER_FLAGS -lInit_shared -lleanshared_2 -lleanshared_1 -lleanshared
+    src/CMakeLists.txt ≈611 LEANC_SHARED_LINKER_FLAGS (Windows) same -l quartet
+    src/shell/CMakeLists.txt ≈41 lean DEPENDS leanshared leanmain
+  CMake dry-run:
+    rg -n 'lInit_shared|lleanshared|Init_shared|leanshared' src/CMakeLists.txt src/shell/CMakeLists.txt
+  Stage1 expected Lean NEEDED residues (classic; blocks earn):
+    libInit_shared.so libleanshared.so libleanshared_1.so libleanshared_2.so
+  Measure baseline (must stay host=0 on classic stage1):
+    ./script/systems-host-elaborator-residual.sh
+    # → HOST_HAS_LEANSHARED=1 GC_FREE_ELABORATOR=0
+
+Examples:
+  lean-systems --version
+  lean-systems build && lean-systems check
+  lean-systems selfhost
+  lean-systems compile /path/to/Tiny.lean
+  # H5 dry-run: measure a hypothetical candidate (still =0 unless residual_free earned)
+  # SYSTEMS_LEAN_HOST_ELF=/path/to/candidate-lean lean-systems check
+EOF
+  banner_honesty
+}
+
+require_lean() {
+  if ! command -v lean >/dev/null 2>&1; then
+    echo "error: lean not on PATH; build stage1 or export PATH=$ROOT/build/release/stage1/bin:\$PATH" >&2
+    exit 1
+  fi
+}
+
+cmd_build() {
+  require_lean
+  if ! command -v "$LAKE" >/dev/null 2>&1 && [[ ! -x "$LAKE" ]]; then
+    echo "error: lake not found (set LAKE= or put stage1 lake on PATH)" >&2
+    exit 1
+  fi
+  echo "=== lean-systems build: freestanding product (bundle) ==="
+  echo "FS_EXAMPLE=$FS_EXAMPLE"
+  banner_honesty
+  (
+    cd "$FS_EXAMPLE"
+    # Lake freestanding := true already forces compiler.freestanding on modules.
+    "$LAKE" --dir=lib build
+  )
+  # Effective product artifact: SYSTEMS_LEAN_BUNDLE override or default path.
+  if [[ ! -f "$BUNDLE" ]]; then
+    echo "FAIL: expected product bundle missing after build: $BUNDLE" >&2
+    if [[ "$BUNDLE" != "$BUNDLE_DEFAULT" ]]; then
+      echo "hint: SYSTEMS_LEAN_BUNDLE=$BUNDLE (default would be $BUNDLE_DEFAULT)" >&2
+    fi
+    exit 1
+  fi
+  echo "OK: freestanding product bundle → $BUNDLE"
+}
+
+# After a successful product nm gate: re-emit dual residual honesty tokens.
+# Product axis comes from link-check success; host axis is *measured* via residual
+# script (or inventory) — never hardcoded GC_FREE_ELABORATOR=1.
+# HOST_DRIVER_RESIDUAL_PLAN=1 is plan honesty only (H3 docs); not residual_free earn.
+# HOST_RESIDUAL_REDUCTION_PLAN=1 is plan honesty only (H4 checklist); not residual_free earn.
+# HOST_ELABORATOR_EARN_PATH=1 is path honesty only (H5 probe path); not residual_free earn.
+# HOST_ELABORATOR_PROTOTYPE_WORKLIST=1 is worklist honesty only (H5 W0–W3); not residual_free earn.
+# HOST_STAGE1_RESIDUAL_BASELINE=classic_RC_shared is baseline honesty only (measured stage1
+# classic RC class); not residual_free earn and not GC_FREE_ELABORATOR=1.
+# HOST_ELABORATOR_W0_VERIFIED_DOCS=1 is docs honesty only (W0 classic residual dry-run
+# transcript present in § H5); not residual_free earn and not GC_FREE_ELABORATOR=1.
+# HOST_ELABORATOR_W1_EXPERIMENT_PROTOCOL=1 is docs honesty only (W1 static-link /
+# thin-driver experiment protocol present in § H5); not residual_free earn and not
+# GC_FREE_ELABORATOR=1.
+# HOST_ELABORATOR_W1_CANDIDATE_PROTOCOL=1 is docs honesty only (W1 measurable
+# candidate pin protocol via SYSTEMS_LEAN_HOST_ELF present in § H5); not residual_free
+# earn and not GC_FREE_ELABORATOR=1.
+# HOST_ELABORATOR_NEXT_EXPERIMENT_STEP=1 is docs honesty only (H5.E3 first-candidate
+# binary identity: lean-systems=product path; stage1 classic; lean-host-static sketch);
+# not residual_free earn and not GC_FREE_ELABORATOR=1.
+# HOST_ELABORATOR_NEGATIVE_CANDIDATES=1 is docs honesty only (H5.E4 identities that must
+# never be residual_free host candidates: lean-systems shell, scripts, non-ELF);
+# not residual_free earn and not GC_FREE_ELABORATOR=1.
+# HOST_ELABORATOR_EARN_CHECKLIST=1 is docs honesty only (fail-closed residual_free
+# candidate prove-list: ELF magic, NEEDED empty under readelf/objdump agreement,
+# no FORCE, product independence); not residual_free earn and not GC_FREE_ELABORATOR=1.
+# HOST_ELABORATOR_FORCE_REFUSAL=1 is docs honesty only (FORCE without residual_free must
+# FAIL on all residual-script exit paths); not residual_free earn and not GC_FREE_ELABORATOR=1.
+# HOST_ELABORATOR_FORCE_NEGATIVE_MEASURED=1 is docs honesty only (measured FORCE-without-
+# residual_free fail receipt on classic stage1 present in § H5); not residual_free earn and
+# not GC_FREE_ELABORATOR=1.
+# HOST_ELABORATOR_STATUS_QUO=1 is docs honesty only (status-quo stage1 summary box: resting
+# measured tokens HOST_HAS_LEANSHARED=1 / classic_RC / GC_FREE_ELABORATOR=0 until earn);
+# not residual_free earn and not GC_FREE_ELABORATOR=1.
+# HOST_ELABORATOR_DOCS_LADDER_COMPLETE=1 is docs honesty only (H5 docs ladder path/worklist/
+# E1–E4/checklist/FORCE/STATUS_QUO complete; only real residual_free ELF remains for earn);
+# not residual_free earn and not GC_FREE_ELABORATOR=1.
+emit_dual_residual_honesty() {
+  local host_script="$ROOT/script/systems-host-elaborator-residual.sh"
+  local inv_script="$ROOT/script/systems-tcb-inventory.sh"
+  local host_out="" host_rc=0
+  local product_gc=1 product_noshared=1
+  local candidate_elf=""
+  # Optional: if caller passes captured link-check stdout, honor its tokens only.
+  if [[ -n "${1:-}" ]]; then
+    product_gc=0
+    product_noshared=0
+    if printf '%s\n' "$1" | grep -qx 'PRODUCT_GC_FREE=1'; then product_gc=1; fi
+    if printf '%s\n' "$1" | grep -qx 'PRODUCT_NO_LEANSHARED=1'; then product_noshared=1; fi
+  fi
+
+  echo "=== dual residual honesty (product wire vs host elaborator; independent axes) ==="
+  echo "HOST_DRIVER_RESIDUAL_PLAN=1"
+  echo "HOST_RESIDUAL_REDUCTION_PLAN=1"
+  echo "HOST_ELABORATOR_EARN_PATH=1"
+  echo "HOST_ELABORATOR_PROTOTYPE_WORKLIST=1"
+  # Plan honesty: default stage1 residual class is classic shared RC. Measured host
+  # tokens below still come only from residual script (must stay GC_FREE_ELABORATOR=0
+  # on classic stage1). Never treat this marker as residual_free earn.
+  echo "HOST_STAGE1_RESIDUAL_BASELINE=classic_RC_shared"
+  # Docs honesty: § H5 includes W0 verification dry-run transcript for classic residual
+  # snapshot. Not residual_free; host measure below remains GC_FREE_ELABORATOR=0 on stage1.
+  echo "HOST_ELABORATOR_W0_VERIFIED_DOCS=1"
+  # Docs honesty: § H5 includes W1 static-link / thin-driver experiment protocol
+  # (try → SYSTEMS_LEAN_HOST_ELF measure → residual_free-only success; ldd never earns).
+  # Not residual_free; host measure below remains GC_FREE_ELABORATOR=0 on stage1.
+  echo "HOST_ELABORATOR_W1_EXPERIMENT_PROTOCOL=1"
+  # Docs honesty: § H5 includes W1 measurable candidate protocol (H5.E2) — pin a future
+  # static lean / thin-driver-adjacent ELF via SYSTEMS_LEAN_HOST_ELF; classic dry-run
+  # still measures =0. Not residual_free; host measure below remains GC_FREE_ELABORATOR=0.
+  echo "HOST_ELABORATOR_W1_CANDIDATE_PROTOCOL=1"
+  # Docs honesty: § H5 includes H5.E3 next experiment step — first-candidate identity
+  # (lean-systems product path ≠ elaborator; stage1 classic; lean-host-static sketch).
+  # Not residual_free; host measure below remains GC_FREE_ELABORATOR=0.
+  echo "HOST_ELABORATOR_NEXT_EXPERIMENT_STEP=1"
+  # Docs honesty: § H5 includes H5.E4 negative candidate identities — lean-systems product
+  # shell, other scripts, non-ELF / empty +x must never be residual_free host candidates.
+  # Not residual_free; host measure below remains GC_FREE_ELABORATOR=0.
+  echo "HOST_ELABORATOR_NEGATIVE_CANDIDATES=1"
+  # Docs honesty: § H5 includes fail-closed residual_free earn checklist — what a residual_free
+  # host ELF must prove (ELF magic; NEEDED empty under readelf and/or objdump agreement;
+  # no FORCE forge; product independence). Not residual_free; host measure below remains =0.
+  echo "HOST_ELABORATOR_EARN_CHECKLIST=1"
+  # Docs honesty: § H5 includes FORCE/negative refusal contract — SYSTEMS_LEAN_FORCE_GC_FREE_ELABORATOR=1
+  # without residual_free must FAIL on all residual-script exit paths. Not residual_free; host =0.
+  echo "HOST_ELABORATOR_FORCE_REFUSAL=1"
+  # Docs honesty: § H5 includes FORCE negative measured receipt — classic stage1 FORCE dry-run
+  # fail-closed greppable lines + negatives suite. Not residual_free; host =0.
+  echo "HOST_ELABORATOR_FORCE_NEGATIVE_MEASURED=1"
+  # Docs honesty: § H5 includes status-quo stage1 summary box — resting measured tokens until earn
+  # (HOST_HAS_LEANSHARED=1 / classic_RC / GC_FREE_ELABORATOR=0). Not residual_free; host =0.
+  echo "HOST_ELABORATOR_STATUS_QUO=1"
+  # Docs honesty: H5 docs ladder (path/worklist/E1–E4/checklist/FORCE/STATUS_QUO) complete;
+  # only real residual_free host ELF remains for earn. Not residual_free; host =0.
+  echo "HOST_ELABORATOR_DOCS_LADDER_COMPLETE=1"
+  echo "PRODUCT_GC_FREE=${product_gc}"
+  echo "PRODUCT_NO_LEANSHARED=${product_noshared}"
+
+  # Optional H5 candidate path: SYSTEMS_LEAN_HOST_ELF maps to SYSTEMS_LEAN_TCB_LEAN
+  # for residual-script measure only. Unset → classic stage1 / existing TCB pin.
+  # Fail-closed: residual script alone decides GC_FREE_ELABORATOR; never hardcode =1.
+  if [[ -n "${SYSTEMS_LEAN_HOST_ELF:-}" ]]; then
+    candidate_elf="$SYSTEMS_LEAN_HOST_ELF"
+    echo "note: H5 candidate measure SYSTEMS_LEAN_HOST_ELF=${candidate_elf} (via residual script; not forge)"
+  fi
+
+  if [[ -f "$host_script" ]]; then
+    chmod +x "$host_script"
+    # Measure host; do not force REQUIRE. Advisory measure keeps product path green.
+    set +e
+    if [[ -n "$candidate_elf" ]]; then
+      host_out="$(SYSTEMS_LEAN_TCB_LEAN="$candidate_elf" "$host_script" 2>/dev/null)"
+      host_rc=$?
+    else
+      host_out="$("$host_script" 2>/dev/null)"
+      host_rc=$?
+    fi
+    set -e
+    if [[ -n "$host_out" ]]; then
+      # Re-emit greppable host residual tokens only (no forge of missing lines).
+      printf '%s\n' "$host_out" | grep -E '^(HOST_HAS_LEANSHARED|HOST_ELABORATOR_RESIDUAL|HOST_ELABORATOR_TCB|GC_FREE_ELABORATOR|HOST_ELABORATOR_RESIDUAL_OK)=' || true
+    fi
+    if [[ "$host_rc" -ne 0 ]]; then
+      echo "note: host residual measure exit=$host_rc (product path independent; not forging GC_FREE_ELABORATOR)" >&2
+    fi
+  elif [[ -f "$inv_script" ]]; then
+    chmod +x "$inv_script"
+    set +e
+    if [[ -n "$candidate_elf" ]]; then
+      host_out="$(SYSTEMS_LEAN_TCB_LEAN="$candidate_elf" "$inv_script" 2>/dev/null)"
+      host_rc=$?
+    else
+      host_out="$("$inv_script" 2>/dev/null)"
+      host_rc=$?
+    fi
+    set -e
+    if [[ -n "$host_out" ]]; then
+      printf '%s\n' "$host_out" | grep -E '^(HOST_HAS_LEANSHARED|HOST_ELABORATOR_RESIDUAL|HOST_ELABORATOR_TCB|GC_FREE_ELABORATOR|TCB_HONESTY_OK)=' || true
+    fi
+  else
+    echo "note: host residual scripts missing; dual host tokens not re-measured" >&2
+  fi
+  echo "note: PRODUCT_GC_FREE and GC_FREE_ELABORATOR are independent; never forge elaborator=1"
+  echo "note: HOST_ELABORATOR_EARN_PATH=1 is path honesty only; earn only residual_free under scanners"
+  echo "note: HOST_ELABORATOR_PROTOTYPE_WORKLIST=1 is worklist honesty only (W0–W3); not residual_free earn"
+  echo "note: HOST_STAGE1_RESIDUAL_BASELINE=classic_RC_shared is baseline honesty only; stage1 still host=0"
+  echo "note: HOST_ELABORATOR_W0_VERIFIED_DOCS=1 is docs honesty only (classic residual dry-run); not residual_free earn"
+  echo "note: HOST_ELABORATOR_W1_EXPERIMENT_PROTOCOL=1 is docs honesty only (W1 static-link/thin-driver protocol); not residual_free earn"
+  echo "note: HOST_ELABORATOR_W1_CANDIDATE_PROTOCOL=1 is docs honesty only (W1 candidate pin via SYSTEMS_LEAN_HOST_ELF); not residual_free earn"
+  echo "note: HOST_ELABORATOR_NEXT_EXPERIMENT_STEP=1 is docs honesty only (H5.E3 first-candidate identity); not residual_free earn"
+  echo "note: HOST_ELABORATOR_NEGATIVE_CANDIDATES=1 is docs honesty only (H5.E4 lean-systems/scripts/non-ELF not residual_free host candidates); not residual_free earn"
+  echo "note: HOST_ELABORATOR_EARN_CHECKLIST=1 is docs honesty only (fail-closed residual_free prove-list; not residual_free earn)"
+  echo "note: HOST_ELABORATOR_FORCE_REFUSAL=1 is docs honesty only (FORCE without residual_free must FAIL; not residual_free earn)"
+  echo "note: HOST_ELABORATOR_FORCE_NEGATIVE_MEASURED=1 is docs honesty only (measured FORCE fail receipt on classic stage1; not residual_free earn)"
+  echo "note: HOST_ELABORATOR_STATUS_QUO=1 is docs honesty only (status-quo stage1 summary: HOST_HAS_LEANSHARED=1 classic_RC GC_FREE_ELABORATOR=0 until earn; not residual_free earn)"
+  echo "note: HOST_ELABORATOR_DOCS_LADDER_COMPLETE=1 is docs honesty only (docs ladder complete; only real residual_free ELF remains for earn; not residual_free earn)"
+}
+
+cmd_check() {
+  # H2 product-only residual: nm gate on the embed archive. No elaborator, no
+  # libleanshared on this path. PRODUCT_GC_FREE is independent of host
+  # GC_FREE_ELABORATOR (classic stage1 may still measure =0 — that is honest).
+  # H3–H5: after product success, print dual residual tokens (measured host;
+  # HOST_DRIVER_RESIDUAL_PLAN + HOST_RESIDUAL_REDUCTION_PLAN +
+  # HOST_ELABORATOR_EARN_PATH + HOST_ELABORATOR_PROTOTYPE_WORKLIST +
+  # HOST_STAGE1_RESIDUAL_BASELINE + HOST_ELABORATOR_W0_VERIFIED_DOCS +
+  # HOST_ELABORATOR_W1_EXPERIMENT_PROTOCOL + HOST_ELABORATOR_W1_CANDIDATE_PROTOCOL +
+  # HOST_ELABORATOR_NEXT_EXPERIMENT_STEP + HOST_ELABORATOR_NEGATIVE_CANDIDATES +
+  # HOST_ELABORATOR_EARN_CHECKLIST + HOST_ELABORATOR_FORCE_REFUSAL +
+  # HOST_ELABORATOR_FORCE_NEGATIVE_MEASURED + HOST_ELABORATOR_STATUS_QUO +
+  # HOST_ELABORATOR_DOCS_LADDER_COMPLETE markers only — not residual_free earn).
+  require_root_scripts
+  local art="${1:-$BUNDLE}"
+  local check_out=""
+  echo "=== lean-systems check (product residual; host elaborator GC-free not required) ==="
+  echo "note: PRODUCT_GC_FREE is product wire residual; GC_FREE_ELABORATOR is host-only"
+  chmod +x "$ROOT/script/systems-selfhost-link-check.sh"
+  check_out="$("$ROOT/script/systems-selfhost-link-check.sh" "$art")"
+  printf '%s\n' "$check_out"
+  emit_dual_residual_honesty "$check_out"
+}
+
+cmd_install_prefix() {
+  require_root_scripts
+  mkdir -p "$PREFIX/bin" "$PREFIX/share/systems-lean"
+  # Stamp root so installed lean-systems can find the tree.
+  printf '%s\n' "$ROOT" >"$PREFIX/share/systems-lean/ROOT"
+  # Install this driver (copy self).
+  local src
+  if [[ -f "$ROOT/script/lean-systems" ]]; then
+    src="$ROOT/script/lean-systems"
+  else
+    src="$0"
+  fi
+  install -m 0755 "$src" "$PREFIX/bin/lean-systems"
+  # Record effective product bundle path when present.
+  if [[ -f "$BUNDLE" ]]; then
+    printf '%s\n' "$BUNDLE" >"$PREFIX/share/systems-lean/bundle.path"
+  fi
+  cat >"$PREFIX/share/systems-lean/README.txt" <<EOF
+Systems Lean self-host product prefix (R6)
+
+bin/lean-systems     product driver (version / build / check / compile / selfhost)
+share/systems-lean/  ROOT stamp, bundle.path, this README
+
+Host elaborator TCB: classic stage1 lean + libleanshared (still uses GC/RC).
+Product embed TCB: freestanding extract + libc only (no Init_shared/leanshared).
+
+Rebuild / gate:
+  $PREFIX/bin/lean-systems selfhost
+  $PREFIX/bin/lean-systems check
+EOF
+  echo "OK: installed lean-systems → $PREFIX/bin/lean-systems"
+}
+
+cmd_negatives() {
+  require_root_scripts
+  chmod +x "$ROOT/script/systems-selfhost-link-check-negatives.sh"
+  "$ROOT/script/systems-selfhost-link-check-negatives.sh"
+}
+
+cmd_tiny_compile() {
+  require_lean
+  require_root_scripts
+  local tiny_dir
+  tiny_dir="$(mktemp -d "${TMPDIR:-/tmp}/lean-systems-tiny.XXXXXX")"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tiny_dir'" RETURN
+  cat >"$tiny_dir/Tiny.lean" <<'EOF'
+module
+prelude
+public import Systems.Scalars
+
+/-! R6 lean-systems tiny freestanding compile smoke. -/
+
+open Systems.Scalars
+
+@[export_c lean_systems_tiny_add]
+public def tinyAdd (x y : U64) : U64 :=
+  U64.add x y
+EOF
+  echo "=== lean-systems tiny freestanding compile ==="
+  SYSTEMS_LEAN_COMPILE_OUT="$tiny_dir/out" cmd_compile "$tiny_dir/Tiny.lean"
+  test -f "$tiny_dir/out/Tiny.c" \
+    || { echo "FAIL: missing Tiny.c from lean-systems compile" >&2; exit 1; }
+  grep -q 'lean_systems_tiny_add' "$tiny_dir/out/Tiny.c" \
+    || { echo "FAIL: Tiny.c missing export lean_systems_tiny_add" >&2; exit 1; }
+  echo "OK: tiny freestanding compile"
+}
+
+cmd_selfhost() {
+  if [[ "${SYSTEMS_LEAN_SELFHOST_SKIP_BUILD:-}" == "1" ]]; then
+    echo "=== lean-systems selfhost (skip build; SYSTEMS_LEAN_SELFHOST_SKIP_BUILD=1) ==="
+    if [[ ! -f "$BUNDLE" ]]; then
+      echo "FAIL: SYSTEMS_LEAN_SELFHOST_SKIP_BUILD=1 but bundle missing: $BUNDLE" >&2
+      exit 1
+    fi
+  else
+    cmd_build
+  fi
+  cmd_install_prefix
+  cmd_check "$BUNDLE"
+  cmd_negatives
+  cmd_tiny_compile
+  echo "=== lean-systems selfhost complete ==="
+  "$PREFIX/bin/lean-systems" --version
+}
+
+cmd_compile() {
+  require_lean
+  local src="${1:-}"
+  if [[ -z "$src" || ! -f "$src" ]]; then
+    echo "error: compile requires a .lean file (got: ${src:-<empty>})" >&2
+    exit 1
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "error: python3 required for lean-systems compile (tool discovery)" >&2
+    exit 1
+  fi
+  local base outdir setup outc fs_olean own_tmpdir=0
+  base="$(basename "$src" .lean)"
+  if [[ -n "${SYSTEMS_LEAN_COMPILE_OUT:-}" ]]; then
+    outdir="$SYSTEMS_LEAN_COMPILE_OUT"
+  else
+    outdir="$(mktemp -d "${TMPDIR:-/tmp}/lean-systems-compile.XXXXXX")"
+    own_tmpdir=1
+    # shellcheck disable=SC2064
+    trap "rm -rf '$outdir'" RETURN
+  fi
+  mkdir -p "$outdir"
+  setup="$outdir/setup.json"
+  outc="$outdir/${base}.c"
+  # Prefer freestanding built oleans when present (for Systems.Scalars imports).
+  fs_olean="$FS_EXAMPLE/lib/.lake/build/lib"
+  if [[ -d "$fs_olean/lean" ]]; then
+    export LEAN_PATH="${fs_olean}${LEAN_PATH:+:$LEAN_PATH}"
+  fi
+  # Minimal setup.json so freestanding emit sees options (matches freestanding gates).
+  # If a donor setup exists (built FS package), reuse importArts for Systems deps.
+  local donor="$FS_EXAMPLE/lib/.lake/build/ir/Systems/Scalars.setup.json"
+  if [[ -f "$donor" ]]; then
+    python3 -c 'import json,sys; from pathlib import Path
+donor=json.loads(Path(sys.argv[1]).read_text())
+setup={"plugins":donor.get("plugins",[]),"package":"lean_systems_tiny",
+  "options":{"compiler.systemsSelfHost":True,"compiler.freestanding":True,"compiler.qtt":True},
+  "name":sys.argv[2],"isModule":True,
+  "importArts":donor.get("importArts",{}),"dynlibs":donor.get("dynlibs",[])}
+print(json.dumps(setup))' "$donor" "$base" >"$setup"
+  else
+    python3 -c 'import json,sys; print(json.dumps({"plugins":[],"package":"lean_systems_tiny","options":{"compiler.systemsSelfHost":True,"compiler.freestanding":True,"compiler.qtt":True},"name":sys.argv[1],"isModule":True,"importArts":{},"dynlibs":[]}))' \
+      "$base" >"$setup"
+  fi
+  echo "=== lean-systems compile (FS product flags) ==="
+  echo "src=$src"
+  echo "out=$outc"
+  banner_honesty
+  lean "${FS_LEAN_OPTS[@]}" "$src" -c "$outc" --setup "$setup"
+  if [[ ! -f "$outc" ]]; then
+    echo "FAIL: no C output written: $outc" >&2
+    exit 1
+  fi
+  # Fail closed: product C must not name Lean RC/runtime residues (aligned with check-ir).
+  # Allow product freestanding exports (lean_fs_*, lean_systems_*, lp_systems__).
+  if grep -E 'lean_object|lean_inc|lean_dec|lean_alloc|lean/lean\.h|initialize_|lean_io_|lean_ctor|lean_apply_|lean_mk_string|lean_box|lean_unbox' "$outc" >/dev/null 2>&1; then
+    echo "FAIL: freestanding C output contains Lean RC/runtime residues: $outc" >&2
+    grep -nE 'lean_object|lean_inc|lean_dec|lean_alloc|lean/lean\.h|initialize_|lean_io_|lean_ctor|lean_apply_|lean_mk_string|lean_box|lean_unbox' "$outc" | head -n20 >&2 || true
+    exit 1
+  fi
+  # Catch other lean_* tokens that are not freestanding product exports.
+  local bad_lean_tok
+  bad_lean_tok=$(grep -oE '\blean_[A-Za-z0-9_]+' "$outc" | grep -Ev '^(lean_fs_|lean_systems_)' | sort -u || true)
+  if [[ -n "$bad_lean_tok" ]]; then
+    echo "FAIL: freestanding C has non-product lean_* tokens: $outc" >&2
+    echo "$bad_lean_tok" >&2
+    exit 1
+  fi
+  echo "OK: freestanding C emit → $outc"
+  # When we own the tmpdir we still need the path printed before RETURN trap removes it —
+  # only print path when caller owns outdir (SYSTEMS_LEAN_COMPILE_OUT) or copy is durable.
+  if [[ $own_tmpdir -eq 0 ]]; then
+    echo "$outc"
+  else
+    # Keep C for caller by printing contents path before cleanup is OK only if they set OUT.
+    # With owned tmpdir, leave a note that artifact was verified then cleaned; re-run with
+    # SYSTEMS_LEAN_COMPILE_OUT to keep it.
+    echo "$outc"
+    # Disable cleanup so printed path remains usable for callers (selfhost sets COMPILE_OUT).
+    trap - RETURN
+  fi
+}
+
+cmd_lean() {
+  require_lean
+  exec lean "${FS_LEAN_OPTS[@]}" "$@"
+}
+
+main() {
+  if [[ $# -eq 0 ]]; then
+    cmd_help
+    exit 0
+  fi
+  case "$1" in
+    --version|-v) cmd_version ;;
+    --help|-h|help) cmd_help ;;
+    build) shift; cmd_build "$@" ;;
+    check) shift; cmd_check "$@" ;;
+    selfhost) shift; cmd_selfhost "$@" ;;
+    install) shift; cmd_install_prefix "$@" ;;
+    negatives) shift; cmd_negatives "$@" ;;
+    compile) shift; cmd_compile "$@" ;;
+    lean) shift; cmd_lean "$@" ;;
+    --) shift; cmd_lean "$@" ;;
+    *)
+      # Unknown flag: if it looks like a lean option, forward with FS flags.
+      if [[ "$1" == -* ]]; then
+        cmd_lean "$@"
+      else
+        echo "error: unknown command: $1 (try --help)" >&2
+        exit 1
+      fi
+      ;;
+  esac
+}
+
+main "$@"

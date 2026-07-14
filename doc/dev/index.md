@@ -5,6 +5,26 @@ After that, read on below to find out how to set up your editor for changing the
 followed by further sections of the development manual where applicable
 such as on the [test suite](../../tests/README.md) and [commit convention](commit_convention.md).
 
+### Systems Lean
+
+**[Systems Lean](systems-lean.md)** is the freestanding systems-programming project in this tree:
+ownership-safe resources, thin syscalls, and AOT to a C static library without the Lean object runtime.
+Prelude sources live under `src/Systems/`; the end-to-end example is `tests/lake/examples/systems/`.
+
+**Reading order (simple → complex):** systems-lean.md (start here) → selfhost → stdlib inventory → CompCert / `./ref` sections in systems-lean.md.
+
+- Canonical doc (build, QTT, certs, CompCert claim ladder, nix dual packages): [systems-lean.md](systems-lean.md)  
+- **Product naming** (plain names; no bulk rename; Track L freeze): [systems-naming.md](systems-naming.md)  
+- **Slake** (Systems Lean twin of Lake; same API, freestanding product): [slake.md](slake.md) — `src/slake/`, parity under `tests/slake/`  
+- Self-host product path (**R6 done**; elaborator still classic): [systems-lean-selfhost.md](systems-lean-selfhost.md) — `./script/systems-selfhost.sh`  
+- Stdlib inventory + R7 product path: [systems-lean-stdlib-inventory.md](systems-lean-stdlib-inventory.md)  
+- Integration smoke: `./script/systems-lean-smoke.sh` from the repo root  
+- Nix (no elan): `packages.lean` (classic, **default**) and `packages.systems-lean`  
+  - `nix eval .#packages.x86_64-linux.lean.name`  
+  - `nix eval .#packages.x86_64-linux.systems-lean.name`  
+- Optional CompCert reference: [`ref/README.md`](../../ref/README.md) (`SYSTEMS_LEAN_COMPCERT_REQUIRE_REF=1`)  
+- Provably CompCert compliant: `./script/systems-compcert-compliant.sh` / `make -C tests/lake/examples/systems check-compcert-compliant` (`./ref` ccomp → `PROVABLY_COMPCERT_COMPLIANT=1`); RESULT dogfood: `check-compcert-dogfood` → `COMPCERT_DOGFOOD=1` only
+
 If you are planning to make any changes that may affect the compilation of Lean itself, e.g. changes to the parser, elaborator, or compiler, you should first read about the [bootstrapping pipeline](bootstrap.md).
 You should not edit the `stage0` directory except using the commands described in that section when necessary.
 

@@ -1,0 +1,117 @@
+/-
+Copyright (c) 2026 Lean FRO, LLC. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Authors: Hunter Beast
+-/
+module
+prelude
+public import Systems.Scalars
+public import Systems.Status
+
+/-!
+# Systems.Queue (Systems Lean)
+
+Fixed-capacity **ring queue** over raw memory — queue-**shaped**, not a managed collection
+and not `Std.Queue` / `Array` / RC ring.
+
+Layout (caller-owned):
+
+* `slots` — `cap` host-endian `U32` slots (`cap * 4` bytes), **4-byte aligned**
+* `head` / `count` — dual `USize` indices owned by the **caller** (not stored by this module)
+
+Ops:
+
+* **Push** at `(head + count) % cap` when not full
+* **Pop** / **peek** at `head` when not empty
+* After a successful pop, caller advances head with `nextHead cap head`
+* After a successful push, caller increments `count`
+
+No malloc. No freestanding multi-field product returns. Status codes follow
+`Systems.Status` (`0` ok, `3` bounds/full/empty-as-bounds where noted).
+
+## Portability / ABI
+
+* **Alignment:** `U32.load` / `U32.store` are host-endian word accesses; unaligned `slots`
+  bases are ISO C undefined behavior. Pass 4-byte-aligned buffers (e.g. `uint32_t[]`).
+* **Capacity contract:** `u32Slot` uses `USize.mul i 4` without overflow checks (Map
+  parity). Keep `cap` small enough that `cap * 4` fits in `size_t`. `cap == 0` is refused
+  (no `% 0` UB).
+* **LP64 product harness:** `pop` / `peek` miss use `USize.neg1` (`(size_t)-1`). On ILP32
+  that collides with storing `UINT32_MAX` — treat as **LP64-only** (Map `get` class).
+* **Not claimed:** growable queues, concurrency, priority queues, or managed storage.
+
+## Intentional TCB (Queue-local)
+
+`U32.load`/`store`, `USize.ofU32`/`mod`/`mul` are freestanding `@[extern]` axioms kept
+**here** (Map/Set parity). Name-pinned on ComplianceCorpus (`path name=Ident`).
+-/
+
+namespace Systems.Queue
+
+open Systems.Scalars
+open Systems.Status
+
+/-- Host-endian `uint32_t` load (`addr` must be 4-byte aligned). -/
+@[extern c inline "(*((const uint32_t*)(#1)))"]
+public axiom U32.load : USize → U32
+
+/-- Host-endian `uint32_t` store; returns `0` (`addr` must be 4-byte aligned). -/
+@[never_extract, extern c inline "(*((uint32_t*)(#1)) = (uint32_t)(#2), (uint32_t)0)"]
+public axiom U32.store : USize → U32 → U32
+
+/-- Widen `U32` → `USize`. -/
+@[extern c inline "((size_t)(uint32_t)(#1))"]
+public axiom USize.ofU32 : U32 → USize
+
+/-- Unsigned modulo (`a % b`). Caller must keep `b ≠ 0`. -/
+@[extern c inline "((size_t)((size_t)(#1) % (size_t)(#2)))"]
+public axiom USize.mod : USize → USize → USize
+
+/-- Unsigned multiply. -/
+@[extern c inline "((size_t)((size_t)(#1) * (size_t)(#2)))"]
+public axiom USize.mul : USize → USize → USize
+
+/-- Address of `U32` slot `i` in a contiguous word array at `base` (base 4-byte aligned). -/
+@[inline] public def u32Slot (base : USize) (i : USize) : USize :=
+  USize.add base (USize.mul i USize.four)
+
+/-- `1` if `count == 0`, else `0`. -/
+@[inline] public def isEmpty (count : USize) : U32 :=
+  bifU32 (USize.beq count USize.zero) U32.one U32.zero
+
+/-- `1` if `n == cap` (full), else `0`. `cap == 0` is treated as full. -/
+@[inline] public def isFull (cap : USize) (n : USize) : U32 :=
+  bifU32 (USize.beq cap USize.zero) U32.one
+    (bifU32 (USize.beq n cap) U32.one U32.zero)
+
+/-- Next head after a successful pop: `(head + 1) % cap`. `cap == 0 → 0` (no `% 0`). -/
+public unsafe def nextHead (cap : USize) (head : USize) : USize :=
+  bifUSize (USize.beq cap USize.zero) USize.zero
+    (USize.mod (USize.add head USize.one) cap)
+
+/-- Push `val` at the tail slot. `0` ok; `errBounds` if `cap == 0` or full.
+
+Does **not** update caller occupancy — on success the caller must use `n + 1`.
+Store status is dataflow-used so EmitC cannot DCE the slot write. -/
+public unsafe def push (slots : USize) (cap : USize) (head : USize) (n : USize)
+    (val : U32) : U32 :=
+  bifU32 (USize.beq cap USize.zero) errBounds
+    (bifU32 (USize.beq n cap) errBounds
+      (let i := USize.mod (USize.add head n) cap
+       let st := U32.store (u32Slot slots i) val
+       bifU32 (isOk st) ok st))
+
+/-- Pop front value as `USize` (`0..UINT32_MAX`), or `USize.neg1` if empty / `cap == 0`.
+
+Does **not** update caller `head`/`n` — on success use `nextHead` and `n - 1`.
+**LP64 only** for the miss sentinel (see module docs). -/
+public unsafe def pop (slots : USize) (cap : USize) (head : USize) (n : USize) : USize :=
+  bifUSize (USize.beq cap USize.zero) USize.neg1
+    (bifUSize (USize.beq n USize.zero) USize.neg1
+      (USize.ofU32 (U32.load (u32Slot slots head))))
+
+/-- Peek front without removing. Same return shape as `pop`. -/
+public unsafe def peek (slots : USize) (cap : USize) (head : USize) (n : USize) : USize :=
+  pop slots cap head n
+
+end Systems.Queue

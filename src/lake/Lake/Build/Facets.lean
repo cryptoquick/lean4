@@ -265,6 +265,31 @@ builtin_facet staticExportFacet @ static.export : LeanLib => FilePath
 /-- A Lean library's shared artifact. -/
 builtin_facet shared : LeanLib => Dynlib
 
+/--
+A Lean library's freestanding static packaging artifact.
+
+Requires `freestanding := true` on the lib (which **forces**
+`compiler.freestanding=true` on module setup). Builds the library's static
+archive and returns the ordered list of freestanding static archives to link:
+this library first, then freestanding `needs` deps (first-seen dedup).
+Does **not** inject Lean shared dynlibs (`Init_shared` / `leanshared*`).
+A `needs` edge to a non-freestanding `lean_lib` is a hard error.
+
+For a **single** combined archive suitable for a one-path `cc` link line, use
+`freestanding.bundle` instead.
+-/
+builtin_facet freestanding : LeanLib => Array FilePath
+
+/--
+A Lean library's combined freestanding static archive.
+
+Builds `freestanding` (ordered multi-archive link set) and repacks those
+archives into one static library (`lib{name}_bundle.a`). Prefer this facet
+for C consumers that want a single `-l` / archive path. Same freestanding
+requirements and fail-closed `needs` policy as `freestanding`.
+-/
+builtin_facet freestandingBundleFacet @ freestanding.bundle : LeanLib => FilePath
+
 /-- A Lean library's `extraDepTargets` mixed with its package's. -/
 builtin_facet extraDep : LeanLib => Unit
 

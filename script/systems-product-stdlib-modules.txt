@@ -1,0 +1,172 @@
+# Systems Lean PRODUCT_STDLIB_MODULES — closed freestanding product stdlib set.
+#
+# This is the authoritative list of Systems product modules that must:
+#   1. Exist as src/Systems/<path>.lean
+#   2. Build under compiler.freestanding (Lake freestanding := true)
+#   3. Be residual-free (nm + IR greps via systems-residual-policy.sh)
+#   4. Be cert-sealed + ccomp'd on the product TU matrix
+#
+# Format (rg-friendly):
+#   - One module path per line, relative to Systems/, no .lean/.c suffix
+#   - Nested modules use / (e.g. Parallelism/Simd → Systems.Parallelism.Simd)
+#   - Lines starting with # and blank lines are ignored
+#
+# Extract (consumer export surface) is NOT listed here; it is always required
+# separately as ir/Extract.c.
+#
+# Gate: ./script/systems-product-stdlib-check.sh
+#   greppable success: PRODUCT_STDLIB_MODULES_OK=1
+# Validate: GATE product_stdlib=PASS in systems-validate.sh
+#
+# Grow this list only when a module passes freestanding build + residual + certs.
+# Do NOT list classic Init/Std modules until they are ported under Systems/.
+
+Scalars
+Sys
+Bytes
+Numerics
+Status
+Mem
+BitOps
+Hash
+ByteSpan
+Map
+BitVec
+Set
+Queue
+Vector
+Sort
+Crc
+String
+BinarySearch
+Deque
+Stack
+Ascii
+MemRegion
+BitSet
+Parse
+RingBuf
+Fmt
+List
+Path
+Hex
+Utf8
+Tree
+Json
+Base64
+Graph
+Regex
+Url
+ArenaPool
+Ini
+Csv
+Bloom
+Toml
+Xml
+SkipList
+Yaml
+Http
+BTree
+Dns
+Sexp
+Avl
+Md
+Icmp
+RbTree
+Pem
+Ntp
+Trie
+Jwt
+Dhcp
+BinaryHeap
+Uuid
+Arp
+IntervalTree
+Semver
+Gre
+Splay
+Cbor
+Ip
+BTreeMap
+TomlQuery
+Udp
+SkipListMap
+Edn
+Tcp
+HashMap
+MsgPack
+Icmpv6
+LinkedHashMap
+Protobuf
+Sctp
+OrderedMap
+Avro
+Dccp
+TreeMap
+Capnp
+Quic
+FlatBuffers
+Mqtt
+RadixTree
+Asn1
+Coap
+YamlQuery
+WebSocket
+BitMap
+Lz4
+Socks5
+Snappy
+Rtsp
+Zstd
+Sip
+Brotli
+NtpQuery
+Ogg
+Smtp
+BitSetMulti
+Webm
+Pop3
+Roaring
+Matroska
+Imap
+IntervalSet
+Flac
+Nntp
+Ldap
+Vorbis
+Radius
+OrderedU32Set
+Diameter
+SctpCommon
+M3ua
+Sua
+Iua
+V5ua
+H248
+Megaco
+Mgcp
+Sdp
+Rtcp
+Stun
+Turn
+Ice
+Rtp
+Srtp
+Srtcp
+Dtls
+Tls
+Ipsec
+DepGraph
+Trace
+TomlConfig
+Proc
+Manifest
+CacheIndex
+L2tp
+Pptp
+L2f
+Ppp
+Hdlc
+Parallelism/Simd
+Parallelism/ForkJoin
+Parallelism/Channel

@@ -11,16 +11,23 @@ import Lean.Compiler.LCNF.EmitUtil
 import Lean.Compiler.NameMangling
 import Lean.Compiler.LCNF.PhaseExt
 import Lean.Compiler.ExportAttr
+import Lean.Compiler.ExportCAttr
+public import Lean.Compiler.Freestanding
+import Lean.Compiler.Options
 import Lean.Compiler.ModPkgExt
 import Lean.Compiler.LCNF.SimpleGroundExpr
 import Lean.Compiler.ClosedTermCache
 import Lean.Runtime
 import Lean.Compiler.LCNF.Internalize
 import Lean.Compiler.InitAttr
+import Lean.Compiler.ExternAttr
+import Lean.Compiler.InlineAttrs
 import Init.Omega
 import Init.While
 import Lean.Compiler.LCNF.SimpCase
 import Lean.Compiler.LCNF.PrettyPrinter
+public import Lean.Compiler.LCNF.MemSafetyCert
+public import Lean.Compiler.LCNF.CompCertCert
 
 namespace Lean.Compiler.LCNF
 
@@ -127,6 +134,126 @@ structure State where
 
 abbrev EmitM := ReaderT Context StateRefT State CompilerM
 
+/-- Re-export freestanding emit predicate (defined in `Lean.Compiler.Freestanding`). -/
+public abbrev isFreestandingEmit := Compiler.isFreestandingEmit
+
+/-- Re-export S2 libc allowlist (defined in `Lean.Compiler.Freestanding`). -/
+public abbrev isAllowlistedFreestandingLibcSymbol := Compiler.isAllowlistedFreestandingLibcSymbol
+
+/-- CoreM view of freestanding emit (bit ∨ option). -/
+def freestandingEmitM : CoreM Bool := do
+  return Compiler.isFreestandingEmit (← getEnv) (← getOptions)
+
+/-- EmitM view of freestanding emit (same as `freestandingEmitM`). -/
+@[inline] def freestandingMode : EmitM Bool :=
+  freestandingEmitM
+
+def throwFreestanding (msg : MessageData) : EmitM α :=
+  throwError m!"freestanding emit: {msg}"
+
+/-- Collect C identifiers from a snippet (letter/`_` start, then alnum/`_`).
+Digit-leading tokens (with optional `uUlL` suffixes) are skipped as numeric literals. -/
+private partial def collectCIdentifiers (s : String) : Array String :=
+  go s.toList #[]
+where
+  go : List Char → Array String → Array String
+  | [], acc => acc
+  | c :: cs, acc =>
+    if c.isAlpha || c == '_' then
+      let (idCs, rest) := (c :: cs).span fun d => d.isAlphanum || d == '_'
+      go rest (acc.push (String.ofList idCs))
+    else if c.isDigit then
+      -- Skip integer constants including suffixes (`31u`, `0ULL`).
+      go (cs.dropWhile fun d => d.isDigit || d == 'u' || d == 'U' || d == 'l' || d == 'L') acc
+    else
+      go cs acc
+
+/-- True if identifier is a Lean runtime / mangled symbol (`lean_*` or default mangle `l_*`).
+Uses C-identifier boundaries (not raw substring), so `clean_up` is not a false positive. -/
+private def isForbiddenFreestandingIdent (id : String) : Bool :=
+  id.startsWith "lean_" || id.startsWith "l_"
+
+/-- True if a C symbol/pattern mentions Lean runtime (`lean_*` / mangled `l_*`) as an identifier. -/
+def isForbiddenFreestandingCSnippet (s : String) : Bool :=
+  (collectCIdentifiers s).any isForbiddenFreestandingIdent
+
+/-- S0–S2 allowed C type/keyword identifiers in freestanding inline patterns. -/
+private def isFreestandingAllowedTypeOrKeyword (id : String) : Bool :=
+  id == "size_t" || id == "uint8_t" || id == "uint16_t" || id == "uint32_t" ||
+  id == "uint64_t" || id == "uintptr_t" || id == "ssize_t" || id == "const" ||
+  id == "for" || id == "unsigned" || id == "signed" || id == "char" || id == "int" ||
+  id == "long" || id == "short" || id == "void" || id == "if" || id == "else" ||
+  id == "while" || id == "do" || id == "break" || id == "continue" || id == "sizeof"
+
+/-- Statement-expr locals: `_` + one or more alphanumerics (e.g. `_i`, `_a`). Not `__builtin_*`. -/
+private def isFreestandingAllowedLocalIdent (id : String) : Bool :=
+  match id.toList with
+  | '_' :: rest => !rest.isEmpty && rest.all Char.isAlphanum
+  | _ => false
+
+/-- Also allow POSIX open-flag / seek / mmap macros from `<fcntl.h>` / `<unistd.h>` /
+`<sys/mman.h>` in freestanding statement exprs (named only; same values on platforms of interest). -/
+private def isFreestandingAllowedFcntlMacro (id : String) : Bool :=
+  id == "O_RDONLY" || id == "O_WRONLY" || id == "O_RDWR" || id == "O_CREAT" ||
+  id == "O_TRUNC" || id == "O_APPEND" || id == "O_EXCL" || id == "O_CLOEXEC" ||
+  id == "SEEK_SET" || id == "SEEK_CUR" || id == "SEEK_END" ||
+  -- S6b Proc pipe: close-on-exec for opposite pipe ends (fcntl F_SETFD / FD_CLOEXEC)
+  id == "F_SETFD" || id == "FD_CLOEXEC" ||
+  -- S5 mmap protection / map / msync flags (named macros only; not open C)
+  id == "PROT_NONE" || id == "PROT_READ" || id == "PROT_WRITE" || id == "PROT_EXEC" ||
+  id == "MAP_SHARED" || id == "MAP_PRIVATE" || id == "MAP_ANON" || id == "MAP_ANONYMOUS" ||
+  id == "MAP_FAILED" ||
+  id == "MS_ASYNC" || id == "MS_SYNC" || id == "MS_INVALIDATE"
+
+private def isFreestandingAllowedIdent (id : String) : Bool :=
+  isFreestandingAllowedTypeOrKeyword id || isFreestandingAllowedLocalIdent id ||
+  isAllowlistedFreestandingLibcSymbol id || isFreestandingAllowedFcntlMacro id
+
+/-- Character class for freestanding inline patterns (ops, placeholders, C99 compound-literal braces).
+`;` remains for historical punctuation; GNU statement expressions `({…})` / `( {…} )` are
+rejected separately by `containsGnuStatementExpr`. -/
+private def isAllowlistedFreestandingInlineChar (c : Char) : Bool :=
+  c.isAlphanum || c == '#' || c == ' ' || c == '\t' || c == '_' ||
+  c == '+' || c == '-' || c == '*' || c == '/' || c == '%' ||
+  c == '(' || c == ')' || c == '{' || c == '}' || c == ';' ||
+  c == '<' || c == '>' || c == '=' || c == '!' ||
+  c == '&' || c == '|' || c == '^' || c == '~' || c == '?' || c == ':' ||
+  c == ',' || c == '[' || c == ']'
+
+/-- True if `pat` contains a GNU statement expression opener `({` or spaced `( {`.
+Does **not** match C99 compound literals such as `(uint32_t){0}` / `&(uint8_t){0}`
+(type tokens sit between `(` and `{`). -/
+partial def containsGnuStatementExpr (pat : String) : Bool :=
+  go pat.toList
+where
+  go : List Char → Bool
+  | [] => false
+  | '(' :: rest =>
+    let skipped := rest.dropWhile fun c => c == ' ' || c == '\t' || c == '\n' || c == '\r'
+    match skipped with
+    | '{' :: _ => true
+    | _ => go rest
+  | _ :: rest => go rest
+
+/-- S0–S10 allowlist: pure C scalar expressions with `#n` placeholders, integer casts,
+pointer loads (e.g. `*((const uint8_t*)(#1))`), comma/ternary ops, and C99 compound
+literals (e.g. `&(uint32_t){v}`). **Not** GNU statement expressions (`({…})`).
+
+Identifiers must be an explicit set of C types/keywords **or** `_`+alphanumeric locals
+(e.g. `_i`) **or** allowlisted libc symbols (`open`/`malloc`/…). Arbitrary calls
+(`fopen`, `printf`, …) are rejected. Separately, `isForbiddenFreestandingCSnippet`
+rejects Lean runtime identifiers `lean_*` / `l_*` even if embedded in braces. -/
+def isAllowlistedFreestandingInlinePattern (pat : String) : Bool :=
+  !containsGnuStatementExpr pat &&
+  pat.all isAllowlistedFreestandingInlineChar &&
+  (collectCIdentifiers pat).all isFreestandingAllowedIdent
+
+/-- Freestanding C types never print `lean_object*` (N6). -/
+def toFreestandingCType (t : Expr) : EmitM String := do
+  unless t.isScalar do
+    throwFreestanding m!"residual non-scalar type `{t}`"
+  return t.toCType
+
 @[inline] def getModName : EmitM Name := return (← read).modName
 
 @[inline] def getModInitFn (phases : IRPhases) : EmitM String := do
@@ -163,7 +290,11 @@ instance : EmitToString FVarId where
 def Arg.toCString (a : Arg .impure) : EmitM String := do
   match a with
   | .fvar fvarId => EmitToString.toEmitString fvarId
-  | .erased => return "lean_box(0)"
+  | .erased =>
+    if (← freestandingMode) then
+      throwFreestanding "residual erased/boxed value"
+    else
+      return "lean_box(0)"
 
 instance : EmitToString (Arg .impure) where
   toEmitString a := a.toCString
@@ -175,6 +306,12 @@ instance : EmitToString (Arg .impure) where
 
 @[inline] def emitLn [EmitToString α] (a : α) : EmitM Unit := do
   emit a; emit "\n"
+
+def emitCType (t : Expr) : EmitM Unit := do
+  if (← freestandingMode) then
+    emit (← toFreestandingCType t)
+  else
+    emit t.toCType
 
 @[inline]
 def emitCApp1 {α : Type} [EmitToString α] (fn : String) (arg : α) : EmitM Unit := do
@@ -243,8 +380,9 @@ def toCName (n : Name) : EmitM String := do
 where
   go : EmitM String := do
     let env ← getEnv
-    -- TODO: we should support simple export names only
-    match getExportNameFor? env n with
+    -- Prefer freestanding `@[export_c]` then ordinary `@[export]`
+    let exportName? := getExportCNameFor? env n <|> getExportNameFor? env n
+    match exportName? with
     | some (.str .anonymous s) => return s
     | some _                   => throwInvalidExportName n
     | none                     => return if n == `main then leanMainFn else getSymbolStem env n
@@ -262,7 +400,8 @@ where
   go : EmitM String := do
     let env ← getEnv;
     -- TODO: we should support simple export names only
-    match getExportNameFor? env n with
+    let exportName? := getExportCNameFor? env n <|> getExportNameFor? env n
+    match exportName? with
     | some (.str .anonymous s) => return "_init_" ++ s
     | some _                   => throwInvalidExportName n
     | none                     => return "_init_" ++ getSymbolStem env n
@@ -278,20 +417,48 @@ def emitFileHeader : EmitM Unit := do
   emit "// Imports:"
   env.imports.forM fun m => emit (" " ++ toString m)
   emitLn ""
-  emitLn "#include <lean/lean.h>"
-  emitLns [
-    "#if defined(__clang__)",
-    "#pragma clang diagnostic ignored \"-Wunused-parameter\"",
-    "#pragma clang diagnostic ignored \"-Wunused-label\"",
-    "#elif defined(__GNUC__) && !defined(__CLANG__)",
-    "#pragma GCC diagnostic ignored \"-Wunused-parameter\"",
-    "#pragma GCC diagnostic ignored \"-Wunused-label\"",
-    "#pragma GCC diagnostic ignored \"-Wunused-but-set-variable\"",
-    "#endif",
-    "#ifdef __cplusplus",
-    "extern \"C\" {",
-    "#endif"
-  ]
+  if (← freestandingMode) then
+    emitLn "// Freestanding extract — no Lean object runtime"
+    emitLns [
+      -- Feature-test macro before POSIX headers so TUs compile under pure -std=c11.
+      "#define _POSIX_C_SOURCE 200809L",
+      "#include <stdint.h>",
+      "#include <stddef.h>",
+      "#include <stdlib.h>",
+      "#include <string.h>",
+      -- S2–S5: POSIX open/close/read/write + malloc/free/memset + fsync/lseek + mmap (K23); no lean.h
+      -- S6 Proc: waitpid (sys/wait.h); fork/execve/pipe/dup2 via unistd.h
+      "#include <unistd.h>",
+      "#include <fcntl.h>",
+      "#include <sys/mman.h>",
+      "#include <sys/wait.h>",
+      "#if defined(__clang__)",
+      "#pragma clang diagnostic ignored \"-Wunused-parameter\"",
+      "#pragma clang diagnostic ignored \"-Wunused-label\"",
+      "#elif defined(__GNUC__) && !defined(__CLANG__)",
+      "#pragma GCC diagnostic ignored \"-Wunused-parameter\"",
+      "#pragma GCC diagnostic ignored \"-Wunused-label\"",
+      "#pragma GCC diagnostic ignored \"-Wunused-but-set-variable\"",
+      "#endif",
+      "#ifdef __cplusplus",
+      "extern \"C\" {",
+      "#endif"
+    ]
+  else
+    emitLn "#include <lean/lean.h>"
+    emitLns [
+      "#if defined(__clang__)",
+      "#pragma clang diagnostic ignored \"-Wunused-parameter\"",
+      "#pragma clang diagnostic ignored \"-Wunused-label\"",
+      "#elif defined(__GNUC__) && !defined(__CLANG__)",
+      "#pragma GCC diagnostic ignored \"-Wunused-parameter\"",
+      "#pragma GCC diagnostic ignored \"-Wunused-label\"",
+      "#pragma GCC diagnostic ignored \"-Wunused-but-set-variable\"",
+      "#endif",
+      "#ifdef __cplusplus",
+      "extern \"C\" {",
+      "#endif"
+    ]
 
 def ctorScalarSizeExpression (usize : Nat) (ssize : Nat) : String :=
   if usize == 0 then
@@ -453,15 +620,59 @@ def paramsWithoutVoid (ps : Array (Param .impure)) :=
 def paramsWithoutErased (ps : Array (Param .impure)) :=
   ps.filter (!·.type.isErased)
 
+/-- Freestanding multi-module (S8): other-module Lean helpers are legal only when the defining
+module was compiled freestanding (fail-closed on host/non-FS imports). -/
+def freestandingOtherModuleOk (fn : Name) : EmitM Bool := do
+  let env ← getEnv
+  match env.getModuleIdxFor? fn with
+  | some idx => return env.isFreestandingModuleByIdx? idx |>.getD false
+  | none => return false
+
 def emitFnDecls : EmitM Unit := do
-  (← getOtherModuleDecls).forM fun sig => do
-    match getExternNameFor (← getEnv) `c sig.name with
-    | some externName => emitExternDecl sig externName
-    | none => emitFnDeclStandard sig true
+  let fs ← freestandingMode
+  -- Freestanding S8: declare `extern` prototypes for other freestanding-module Lean helpers
+  -- (bodies live in that module's .c; same static archive / cross-object link). Skip inline
+  -- externs (expanded at use). Still omit closed-term/once cells.
+  if fs then
+    (← getOtherModuleDecls).forM fun sig => do
+      match getExternAttrData? (← getEnv) sig.name |>.bind (getExternEntryFor · `c) with
+      | some (.inline ..) => pure ()
+      | some (.standard _ externName) =>
+        -- Named libc / standard externs: allowlisted at call site; prototype not required for
+        -- libc, but emit if present so linkage is explicit.
+        if isAllowlistedFreestandingLibcSymbol externName then
+          pure ()
+        else
+          emitExternDecl sig externName
+      | _ =>
+        unless (← freestandingOtherModuleOk sig.name) do
+          throwFreestanding m!"non-local non-inline freestanding callee `{sig.name}` \
+            (defining module is not freestanding)"
+        emitFnDeclStandard sig true
+  else
+    (← getOtherModuleDecls).forM fun sig => do
+      match getExternNameFor (← getEnv) `c sig.name with
+      | some externName => emitExternDecl sig externName
+      | none =>
+        -- Skip pure inline externs (no symbol); declare others.
+        match getExternAttrData? (← getEnv) sig.name |>.bind (getExternEntryFor · `c) with
+        | some (.inline ..) => pure ()
+        | _ => emitFnDeclStandard sig true
   (← getLocalDecls).forM fun decl => do
-    match getExternNameFor (← getEnv) `c decl.name with
-    | some externName => emitExternDecl decl.toSignature externName
-    | none => emitFnDecl decl false
+    if fs then
+      -- Freestanding roots are code or non-inline; skip pure inline externs (expanded at use).
+      match getExternAttrData? (← getEnv) decl.name |>.bind (getExternEntryFor · `c) with
+      | some (.inline ..) => pure ()
+      | some (.standard _ externName) => emitExternDecl decl.toSignature externName
+      | _ =>
+        if decl.value matches .extern .. then
+          pure () -- opaque extern without body
+        else
+          emitFnDecl decl false
+    else
+      match getExternNameFor (← getEnv) `c decl.name with
+      | some externName => emitExternDecl decl.toSignature externName
+      | none => emitFnDecl decl false
 where
   emitExternDecl (sig : Signature .impure) (externName : String) : EmitM Unit := do
     let env ← getEnv
@@ -471,7 +682,11 @@ where
   emitFnDecl (decl : Decl .impure) (isExternal : Bool) : EmitM Unit := do
     let env ← getEnv
     let cppBaseName ← toCName decl.name
-    if isSimpleGroundDecl env decl.name then
+    if (← freestandingMode) then
+      if isSimpleGroundDecl env decl.name || isClosedTermName env decl.name then
+        throwFreestanding m!"closed/ground term `{decl.name}` requires Lean runtime"
+      emitFnDeclStandard decl.toSignature isExternal
+    else if isSimpleGroundDecl env decl.name then
       emitGroundDecl decl cppBaseName
     else if isClosedTermName env decl.name then
       emitFnDeclClosed decl cppBaseName
@@ -483,7 +698,6 @@ where
     emitLn s!"static {decl.type.toCType} {cppBaseName};"
 
   emitFnDeclStandard (sig : Signature .impure) (isExternal : Bool) : EmitM Unit := do
-    let env ← getEnv
     let cppBaseName ← toCName sig.name
     emitFnDeclAux sig cppBaseName isExternal
 
@@ -491,15 +705,34 @@ where
       EmitM Unit := do
     let ps := sig.params
     let env ← getEnv
+    let fs ← freestandingMode
+    -- Freestanding linkage (S7/S8):
+    -- * `@[export_c]` → unmangled public ABI (`lean_fs_*`)
+    -- * other **public** Lean helpers → external mangled symbols (cross-module static archive)
+    -- * private / non-public helpers → `static` (file-local; not part of documented ABI)
+    let fsExportC := fs && isExportC env sig.name
+    -- Cross-module helpers: public non-private names only (private Lean names stay `static`
+    -- even if visibility inference marked them public for olean export).
+    let fsCrossMod := fs && !fsExportC && isDeclPublic env sig.name && !isPrivateName sig.name
 
-    if ps.isEmpty then
+    if fs then
+      if isExternal then
+        emit "extern "
+      else if !(fsExportC || fsCrossMod) then
+        emit "static "
+    else if ps.isEmpty then
       if isExternal then
         emit "extern "
       else
         emit "LEAN_EXPORT "
     else if !isExternal then
       emit "LEAN_EXPORT "
-    emit <| sig.type.toCType ++ " " ++ cppBaseName
+    if fs then
+      emit (← toFreestandingCType sig.type)
+    else
+      emit sig.type.toCType
+    emit " "
+    emit cppBaseName
     unless ps.isEmpty do
       emit "("
       -- We omit void parameters, note that they are guaranteed not to occur in boxed functions
@@ -507,11 +740,15 @@ where
       -- We omit erased parameters for extern constants
       let ps := if isExternC env sig.name then paramsWithoutErased ps else ps
       if ps.size > closureMaxArgs && isBoxedName sig.name then
+        if fs then throwFreestanding m!"boxed/closure arity for `{sig.name}`"
         emit "lean_object**"
       else
         ps.size.forM fun i _ => do
           if i > 0 then emit ", "
-          emit ps[i].type.toCType
+          if fs then
+            emit (← toFreestandingCType ps[i].type)
+          else
+            emit ps[i].type.toCType
       emit ")"
     emitLn ";"
 
@@ -550,27 +787,35 @@ where
 
 
   declareVar (binderName : Name) (type : Expr) : EmitM Unit := do
-    emit type.toCType; emit " "; emit binderName; emit "; "
+    emitCType type; emit " "; emit binderName; emit "; "
 
   declareParams (ps : Array (Param .impure)) : EmitM Unit := do
     ps.forM fun p => declareVar p.binderName p.type
 
 def emitLetDecl (decl : LetDecl .impure) : EmitM Unit := do
-  match decl.value with
-  | .ctor info args => emitCtor info args
-  | .reset n fvarId => emitReset n fvarId
-  | .reuse fvarId info update args => emitReuse fvarId info update args
-  | .oproj i fvarId => emitOproj i fvarId
-  | .uproj i fvarId => emitUproj i fvarId
-  | .sproj n offset fvarId => emitSproj n offset fvarId
-  | .fap fn args => emitFap fn args
-  | .pap fn args => emitPap fn args
-  | .fvar fvarId args => emitAp fvarId args
-  | .box ty fvarId => emitBox ty fvarId
-  | .unbox fvarId => emitUnbox fvarId
-  | .isShared fvarId => emitIsShared fvarId
-  | .lit v => emitLit v
-  | .erased => emitErased
+  if (← freestandingMode) then
+    match decl.value with
+    | .fap fn args => emitFap fn args
+    | .lit v => emitLit v
+    | .ctor .. | .reset .. | .reuse .. | .oproj .. | .uproj .. | .sproj ..
+    | .pap .. | .fvar .. | .box .. | .unbox .. | .isShared .. | .erased =>
+      throwFreestanding m!"residual object/RC/alloc operation in `{decl.binderName}`"
+  else
+    match decl.value with
+    | .ctor info args => emitCtor info args
+    | .reset n fvarId => emitReset n fvarId
+    | .reuse fvarId info update args => emitReuse fvarId info update args
+    | .oproj i fvarId => emitOproj i fvarId
+    | .uproj i fvarId => emitUproj i fvarId
+    | .sproj n offset fvarId => emitSproj n offset fvarId
+    | .fap fn args => emitFap fn args
+    | .pap fn args => emitPap fn args
+    | .fvar fvarId args => emitAp fvarId args
+    | .box ty fvarId => emitBox ty fvarId
+    | .unbox fvarId => emitUnbox fvarId
+    | .isShared fvarId => emitIsShared fvarId
+    | .lit v => emitLit v
+    | .erased => emitErased
 where
   emitAllocCtor (info : CtorInfo) : EmitM Unit :=
     emitCApp3 "lean_alloc_ctor" info.cidx info.size (ctorScalarSizeExpression info.usize info.ssize)
@@ -638,28 +883,63 @@ where
   emitFap (fn : Name) (args : Array (Arg .impure)) : EmitM Unit := do
     let some sig ← getImpureSignature? fn | unreachable!
     let ps := sig.params
+    let fs ← freestandingMode
     withEmitAssignment do
       match getExternAttrData? (← getEnv) fn |>.bind (getExternEntryFor · `c) with
-      | some (.standard _ fn) =>
+      | some (.standard _ fnName) =>
+        if fs then
+          if isForbiddenFreestandingCSnippet fnName || fnName.startsWith "lean_" || fnName.startsWith "l_" then
+            throwFreestanding m!"forbidden Lean runtime / non-allowlisted extern `{fnName}`"
+          -- S2–S5: tight named libc allowlist only; still reject lean_io_* etc.
+          unless isAllowlistedFreestandingLibcSymbol fnName do
+            throwFreestanding m!"non-inline extern `{fnName}` not on freestanding libc allowlist \
+              (allowed: open, close, read, write, malloc, free, memset, fsync, lseek, mmap, munmap, msync, ftruncate; use `@[extern c inline \"…\"]` for scalar ops)"
         let (_, args) :=
           ps.zip args
             |>.filter (fun (p, _) => !(p.type.isVoid || p.type.isErased))
             |>.unzip
-        emit fn; emit "("
+        emit fnName; emit "("
         for h : i in 0...args.size do
           if i > 0 then emit ", "
           emit args[i]
         emit ")"
       | some (.inline _ pat) =>
+        if fs then
+          if isForbiddenFreestandingCSnippet pat then
+            throwFreestanding m!"forbidden Lean runtime in inline extern pattern: `{pat}`"
+          if containsGnuStatementExpr pat then
+            throwFreestanding m!"GNU statement expression not allowed in freestanding inline pattern \
+              (S10: use ISO C11 casts/comma/ternary/compound literals or Lean control-flow): `{pat}`"
+          unless isAllowlistedFreestandingInlinePattern pat do
+            throwFreestanding m!"inline extern pattern not on freestanding allowlist: `{pat}`"
         emit (expandExternPattern pat (← toStringArgs args))
       | some .opaque | none =>
-        emitLeanFunReference decl.type fn
-        if args.size > 0 then
-          let (_, args) :=
-            ps.zip args
-              |>.filter (fun (p, _) => !p.type.isVoid)
-              |>.unzip
-          emit "("; emitArgs args; emit ")"
+        if fs then
+          -- S8 multi-module: non-inline Lean callees may live in other freestanding modules of
+          -- the same package. Bodies are emitted in the defining module's .c (public → external
+          -- mangled; private stays `static` same-TU only). Fail-closed: non-freestanding modules
+          -- and non-allowlisted named externs are still rejected.
+          let isLocal := (← getLocalImpureDecl? fn).isSome
+          if !isLocal then
+            unless (← freestandingOtherModuleOk fn) do
+              throwFreestanding m!"non-local non-inline freestanding callee `{fn}` \
+                (S8: callee must be defined in a freestanding module; use `@[extern c inline]` \
+                prelude ops, or same-package freestanding Lean helpers)"
+          emitCName fn
+          if args.size > 0 then
+            let (_, args) :=
+              ps.zip args
+                |>.filter (fun (p, _) => !p.type.isVoid)
+                |>.unzip
+            emit "("; emitArgs args; emit ")"
+        else
+          emitLeanFunReference decl.type fn
+          if args.size > 0 then
+            let (_, args) :=
+              ps.zip args
+                |>.filter (fun (p, _) => !p.type.isVoid)
+                |>.unzip
+            emit "("; emitArgs args; emit ")"
       | _ => throwError s!"failed to emit extern application '{fn}'"
 
   emitPap (fn : Name) (args : Array (Arg .impure)) : EmitM Unit := do
@@ -701,11 +981,15 @@ where
       | .uint64 v => emit v; emit "ULL"
       | .usize v => emit "((size_t)"; emit v; emit "ULL)"
       | .nat v =>
+        if (← freestandingMode) then
+          throwFreestanding m!"Nat literal requires Lean runtime"
         if v < UInt32.size then
           emit "lean_unsigned_to_nat("; emit v; emit "u)"
         else
           emit "lean_cstr_to_nat(\""; emit v; emit "\")"
       | .str v =>
+        if (← freestandingMode) then
+          throwFreestanding m!"String literal requires Lean runtime"
         emitCApp3 "lean_mk_string_unchecked" (quoteString v) v.utf8ByteSize v.length
 
   emitErased : EmitM Unit := do
@@ -733,7 +1017,7 @@ def emitTailCall (decl : LetDecl .impure) : EmitM Unit := do
         let p := ps[i]
         let arg := args[i]!
         unless paramEqArg p arg do
-          emit p.type.toCType; emit " _tmp_"; emit i; emit " = "; emit arg; emitLn ";"
+          emitCType p.type; emit " _tmp_"; emit i; emit " = "; emit arg; emitLn ";"
 
       for h : i in 0...ps.size do
         let p := ps[i]
@@ -787,24 +1071,38 @@ partial def emitBasicBlock (code : Code .impure) : EmitM Unit := do
       emitLetDecl decl
       emitBasicBlock k
   | .inc fvarId n check persistent k =>
+    if (← freestandingMode) then
+      throwFreestanding m!"residual lean_inc/RC"
     unless persistent do emitInc fvarId n check
     emitBasicBlock k
   | .dec fvarId n check persistent objs? k =>
+    if (← freestandingMode) then
+      throwFreestanding m!"residual lean_dec/RC"
     unless persistent do emitDec fvarId n check objs?
     emitBasicBlock k
   | .del fvarId k =>
+    if (← freestandingMode) then
+      throwFreestanding m!"residual lean_del"
     emitDel fvarId
     emitBasicBlock k
   | .setTag fvarId cidx k =>
+    if (← freestandingMode) then
+      throwFreestanding m!"residual lean_ctor_set_tag"
     emitSetTag fvarId cidx
     emitBasicBlock k
   | .oset fvarId i y k =>
+    if (← freestandingMode) then
+      throwFreestanding m!"residual lean_ctor_set"
     emitOset fvarId i y
     emitBasicBlock k
   | .uset fvarId i y k =>
+    if (← freestandingMode) then
+      throwFreestanding m!"residual lean_ctor_set_usize"
     emitUset fvarId i y
     emitBasicBlock k
   | .sset fvarId i offset y ty k =>
+    if (← freestandingMode) then
+      throwFreestanding m!"residual lean_ctor_set scalar"
     emitSset fvarId i offset y ty
     emitBasicBlock k
   | .cases cs => emitCases cs
@@ -901,7 +1199,10 @@ where
     emit "goto "; emit fvarId; emitLn ";"
 
   emitUnreach : EmitM Unit := do
-    emitLn "lean_internal_panic_unreachable();"
+    if (← freestandingMode) then
+      emitLn "/* freestanding unreachable */ __builtin_unreachable();"
+    else
+      emitLn "lean_internal_panic_unreachable();"
 
 partial def emitJoinPoints (code : Code .impure) : EmitM Unit := do
   match code with
@@ -924,35 +1225,62 @@ end
 
 def emitDecl (decl : Decl .impure) : EmitM Unit := do
   let env ← getEnv
+  let fs ← freestandingMode
   if hasInitAttr env decl.name || isSimpleGroundDecl env decl.name then
+    if fs then
+      throwFreestanding m!"init/ground decl `{decl.name}` not allowed"
     return ()
   match decl.value with
   | .extern .. => return ()
   | .code code =>
     let baseName ← toCName decl.name
     let ps := decl.params
-    if ps.isEmpty then
+    if fs then
+      unless decl.type.isScalar do
+        throwFreestanding m!"non-scalar result type for `{decl.name}`"
+      for p in ps do
+        unless p.type.isScalar || p.type.isVoid || p.type.isErased do
+          throwFreestanding m!"non-scalar parameter in `{decl.name}`"
+    if fs then
+      -- Public ABI is `@[export_c]`; public non-private helpers get external mangled linkage (S8
+      -- multi-module). Private Lean names stay file-local `static`.
+      unless isExportC env decl.name || (isDeclPublic env decl.name && !isPrivateName decl.name) do
+        emit "static "
+    else if ps.isEmpty then
       emit "static "
     else
       -- make the symbol visible to the interpreter for native execution
       emit "LEAN_EXPORT "
 
-    emit decl.type.toCType; emit " "
+    if fs then
+      emit (← toFreestandingCType decl.type)
+    else
+      emit decl.type.toCType
+    emit " "
 
     if ps.isEmpty then
-      emitCInitName decl.name
-      emit "(void)"
+      if fs then
+        emit baseName
+        emit "(void)"
+      else
+        emitCInitName decl.name
+        emit "(void)"
     else
       emit baseName
       emit "("
       let ps := paramsWithoutVoid ps
       if ps.size > closureMaxArgs && isBoxedName decl.name then
+        if fs then throwFreestanding m!"boxed decl `{decl.name}`"
         emit "lean_object** _args"
       else
         ps.size.forM fun i _ => do
           if i > 0 then emit ", "
           let p := ps[i]
-          emit p.type.toCType; emit " "; emit p.binderName
+          if fs then
+            emit (← toFreestandingCType p.type)
+          else
+            emit p.type.toCType
+          emit " "; emit p.binderName
       emit ")"
 
     withEmitBlock do
@@ -1148,20 +1476,49 @@ def main : EmitM Unit := do
   emitFileHeader
   emitFnDecls
   emitFns
-  if (← getEnv).header.isModule then
-    emitInitFn (phases := .runtime)
-    emitInitFn (phases := .comptime)
-    emitLegacyInitFn
+  if (← freestandingMode) then
+    -- I3: omit all module/import inits and main wrapper in freestanding extract
+    pure ()
   else
-    emitInitFn (phases := .all)
-  emitMainFnIfNeeded
+    if (← getEnv).header.isModule then
+      emitInitFn (phases := .runtime)
+      emitInitFn (phases := .comptime)
+      emitLegacyInitFn
+    else
+      emitInitFn (phases := .all)
+    emitMainFnIfNeeded
   emitFileFooter
 
 public def emitCForDecls (modName : Name) (decls : Array Name) : CoreM String := do
-  let (localDecls, otherModuleDecls) ← collectUsedDecls decls
+  let (localDecls0, otherModuleDecls) ← collectUsedDecls decls
   let env ← getEnv
-  let indexMap := getImpureDeclIndices env decls
-  let localDecls := localDecls.qsort fun l r => indexMap[l.name]! < indexMap[r.name]!
+  -- Freestanding gate: reject residual object-typed extract roots (bit ∨ option, K20)
+  let localDecls ← do
+    if ← freestandingEmitM then
+      -- Drop boxed wrappers (object ABI). Fail closed on any remaining non-scalar.
+      let localDecls := localDecls0.filter fun decl => !isBoxedName decl.name
+      for decl in localDecls do
+        unless decl.type.isScalar do
+          throwError "freestanding emit: `{decl.name}` has non-scalar type"
+        for p in decl.params do
+          unless p.type.isScalar || p.type.isVoid || p.type.isErased do
+            throwError "freestanding emit: `{decl.name}` has non-scalar parameter"
+      pure localDecls
+    else
+      pure localDecls0
+  -- Order by full local impure decl order when available (targets may be a subset for freestanding).
+  let allLocal ← getLocalImpureDecls
+  let localDecls :=
+    if allLocal.isEmpty then
+      localDecls
+    else
+      let indexMap := getImpureDeclIndices env allLocal
+      localDecls.qsort fun l r =>
+        match indexMap[l.name]?, indexMap[r.name]? with
+        | some i, some j => i < j
+        | some _, none => true
+        | none, some _ => false
+        | none, none => Name.quickLt l.name r.name
   let (_, { buf, .. }) ←
     main
       |>.run { localDecls, otherModuleDecls, modName }
@@ -1169,7 +1526,64 @@ public def emitCForDecls (modName : Name) (decls : Array Name) : CoreM String :=
       |>.run (phase := .impure)
   return buf
 
+/-- Emit C for freestanding modules (I5 + S8).
+
+Roots:
+* all local `@[export_c]` decls (documented C ABI)
+* **public non-inline** local impure decls with Lean code bodies (cross-module helpers; S8)
+
+`@[inline]` / `@[macro_inline]` public helpers are **not** package roots (they expand at call
+sites or are pulled only if referenced without inlining). `collectUsedDecls` still pulls private
+local helpers used by roots. Public non-inline helpers in dependency freestanding modules are
+emitted in *those* modules' `.c` files and linked via the static archive (external mangled
+symbols) — not dynamic loading.
+
+**Packaging boundary:** any freestanding module in the environment may be called (`extern`
+mangled); the consumer must link every contributing object/archive. Same-Lake-package is the
+harness story, not an EmitC package check. -/
+public def getFreestandingEmitRoots : CoreM (Array Name) := do
+  let env ← getEnv
+  let mut roots := getLocalExportCDeclNames env
+  let mut seen : NameSet := roots.foldl (init := {}) (fun s n => s.insert n)
+  for name in (← getLocalImpureDecls) do
+    if seen.contains name then continue
+    -- Never freestanding-emit boxed Lean runtime wrappers (object ABI).
+    if isBoxedName name then continue
+    -- Only **public** (non-private-name) Lean helpers are package roots; private helpers are
+    -- pulled via `collectUsedDecls` from roots that use them.
+    if isPrivateName name then continue
+    unless isDeclPublic env name do continue
+    -- Skip residual `@[inline]` / `@[macro_inline]` surface (documented multi-module helpers
+    -- are non-inline: e.g. `checksumGo` / `memEqGo` / `logGet`).
+    if hasInlineAttribute env name || hasMacroInlineAttribute env name then continue
+    let some decl ← getLocalImpureDecl? name | continue
+    -- Only unboxed scalar code helpers; skip object-typed leftovers.
+    unless decl.type.isScalar do continue
+    let okParams := decl.params.all fun p => p.type.isScalar || p.type.isVoid || p.type.isErased
+    unless okParams do continue
+    match decl.value with
+    | .code _ =>
+      roots := roots.push name
+      seen := seen.insert name
+    | .extern .. => pure ()
+  return roots
+
 public def emitC (modName : Name) : CoreM String := do
-  emitCForDecls modName (← getLocalImpureDecls)
+  -- Freestanding: export_c roots + public Lean helpers (S8 multi-module packaging)
+  if ← freestandingEmitM then
+    let cBody ← emitCForDecls modName (← getFreestandingEmitRoots)
+    -- Universal choke point: freestanding consumer C is never returned without a
+    -- machine-checkable memory-safety certificate (QTT 0-qty + linear free-safety).
+    match MemSafetyCert.sealCertificate modName cBody with
+    | .error msg =>
+      throwError m!"freestanding memory-safety certificate failed: {msg}"
+    | .ok sealedMemsafe =>
+      -- Treat layer: CompCert-oriented formal cert on top of verified memsafe.
+      match CompCertCert.sealCompCert modName sealedMemsafe with
+      | .ok sealed => pure sealed
+      | .error msg =>
+        throwError m!"freestanding CompCert-oriented certificate failed: {msg}"
+  else
+    emitCForDecls modName (← getLocalImpureDecls)
 
 end Lean.Compiler.LCNF

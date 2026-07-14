@@ -1,0 +1,6 @@
+name = "basic_toml"
+version = "0.1.0"
+defaultTargets = ["BasicToml"]
+
+[[lean_lib]]
+name = "BasicToml"

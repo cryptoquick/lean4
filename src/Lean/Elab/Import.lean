@@ -9,6 +9,8 @@ prelude
 public import Lean.Parser.Module
 meta import Lean.Parser.Module
 import Lean.Compiler.ModPkgExt
+import Lean.Compiler.Freestanding
+import Lean.Compiler.Options
 public import Lean.DeprecatedModule
 import Init.Data.String.Modify
 
@@ -161,6 +163,18 @@ def processHeaderCore
     let pos := inputCtx.fileMap.toPosition startPos
     pure (env, messages.add { fileName := inputCtx.fileName, data := toString e, pos := pos })
   let env := env.setMainModule mainModule |>.setModulePackage package?
+  -- Freestanding extract (K20/I1): mark module and reject non-freestanding imports.
+  let (env, messages) :=
+    if Compiler.compiler.freestanding.get opts then
+      let messages :=
+        match checkFreestandingImports env imports with
+        | .ok () => messages
+        | .error msg =>
+          let pos := inputCtx.fileMap.toPosition startPos
+          messages.add { fileName := inputCtx.fileName, data := msg, pos := pos }
+      (env.setFreestandingModule true, messages)
+    else
+      (env, messages)
   let messages := checkDeprecatedImports env imports opts inputCtx startPos messages headerStx? origHeaderStx?
   let messages := checkModuleNamePortability mainModule inputCtx startPos messages
   return (env, messages)

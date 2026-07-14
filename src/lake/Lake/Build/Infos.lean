@@ -345,6 +345,14 @@ public abbrev staticExport (self : LeanLib) : BuildInfo :=
 public abbrev shared (self : LeanLib) : BuildInfo :=
   self.facetCore sharedFacet
 
+@[inherit_doc freestandingFacet]
+public abbrev freestanding (self : LeanLib) : BuildInfo :=
+  self.facetCore freestandingFacet
+
+@[inherit_doc freestandingBundleFacet]
+public abbrev freestandingBundle (self : LeanLib) : BuildInfo :=
+  self.facetCore freestandingBundleFacet
+
 @[inherit_doc extraDepFacet]
 public abbrev extraDep (self : LeanLib) : BuildInfo :=
   self.facetCore extraDepFacet

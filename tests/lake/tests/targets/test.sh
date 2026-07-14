@@ -86,6 +86,9 @@ test ! -f ./.lake/build/lib/libBar.a
 $LAKE build Foo:shared Bar:static
 test -f ./.lake/build/lib/libBar.a
 
+# S12: freestanding facet is a known lean_lib facet; requires freestanding := true
+test_err 'is not freestanding' build Foo:freestanding
+
 # Test dynlib facet
 test ! -f ./.lake/build/lib/lean/${PKG}_Foo.$SHARED_LIB_EXT
 $LAKE build +Foo:dynlib

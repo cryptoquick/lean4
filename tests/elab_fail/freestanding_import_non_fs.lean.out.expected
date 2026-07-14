@@ -1,0 +1,1 @@
+freestanding_import_non_fs.lean:1:0: error: freestanding module cannot import non-freestanding module `Init`

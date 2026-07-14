@@ -7,6 +7,7 @@ module
 
 prelude
 public import Lean.Attributes
+import Lean.Compiler.ExportCAttr
 
 public section
 
@@ -68,7 +69,8 @@ def getExportNameFor? (env : Environment) (n : Name) : Option Name :=
 
 def isExport (env : Environment) (n : Name) : Bool :=
   -- The main function morally is an exported function as well. In particular,
-  -- it should not participate in borrow inference.
-  (getExportNameFor? env n).isSome || n == `main
+  -- it should not participate in borrow inference. Freestanding `@[export_c]`
+  -- is treated as exported for the same reasons.
+  (getExportNameFor? env n).isSome || isExportC env n || n == `main
 
 end Lean

@@ -1,0 +1,70 @@
+OK: classic isQttMode false
+OK: classic checkQttUses no-op on double-use
+OK: isQttMode under compiler.qtt
+OK: linear used once (identity) OK
+OK: ω free copy OK
+OK: closed linear id OK
+OK: double-use of linear rejected
+OK: silent drop of linear rejected
+OK: 0-qty runtime use rejected
+OK: unused erased ambient OK (not in term)
+OK: full ite arg count=5
+OK: full ite (with Decidable) both arms OK
+OK: full ite path disagreement rejected
+OK: full ite distinct linear pure-fvar arms rejected
+OK: cond both arms OK
+OK: cond distinct linear pure-fvar arms rejected
+OK: Bool.casesOn both arms OK
+OK: Bool.casesOn distinct linear pure-fvar arms rejected
+OK: Option.casesOn linear both minors OK
+OK: ite alts with linear λ binders OK (no merge leak)
+OK: unrecognized Nat.rec multi-arm rejected
+OK: unrecognized Nat.recOn multi-arm rejected
+OK: unrecognized Nat.brecOn multi-arm rejected
+OK: unrecognized Eq.ndrec multi-arm rejected
+OK: unrecognized Eq.ndrecOn multi-arm rejected
+OK: unrecognized Eq.ndrec_symm multi-arm rejected
+OK: unrecognized Eq.rec multi-arm rejected
+OK: unrecognized Eq.recOn multi-arm rejected
+OK: unrecognized HEq.rec multi-arm rejected
+OK: unrecognized HEq.recOn multi-arm rejected
+OK: unrecognized Acc.rec multi-arm rejected
+OK: unrecognized Acc.recOn multi-arm rejected
+OK: unrecognized WellFounded.fix multi-arm rejected
+OK: unrecognized WellFounded.fixF multi-arm rejected
+OK: unrecognized Quot.lift multi-arm rejected
+OK: unrecognized Quot.ind multi-arm rejected
+OK: unrecognized Quot.liftOn multi-arm rejected
+OK: unrecognized Nat.noConfusion multi-arm rejected
+OK: unrecognized Lean.Literal.strVal.elim multi-arm rejected
+OK: unrecognized Lean.Literal.natVal.elim multi-arm rejected
+OK: unrecognized Lean.Name.str.elim multi-arm rejected
+OK: unrecognized Lean.Name.num.elim multi-arm rejected
+OK: full dite both arms OK
+OK: full dite path disagreement rejected
+OK: synthetic bifU32 both arms OK
+OK: synthetic bifU32 distinct linear pure-fvar arms rejected
+OK: synthetic bifU64 both arms OK
+OK: synthetic bifU64 distinct linear pure-fvar arms rejected
+OK: synthetic bifU8 both arms OK
+OK: synthetic bifU8 distinct linear pure-fvar arms rejected
+OK: synthetic bifUSize both arms OK
+OK: synthetic bifUSize distinct linear pure-fvar arms rejected
+OK: synthetic bifBool both arms OK
+OK: synthetic bifBool distinct linear pure-fvar arms rejected
+OK: synthetic bifArena both arms OK
+OK: synthetic bifArena distinct linear pure-fvar arms rejected
+OK: synthetic bifMMap both arms OK
+OK: synthetic bifMMap distinct linear pure-fvar arms rejected
+OK: Option.casesOn distinct linear arm remainders rejected
+OK: mvar hole does not discharge linear (silent drop)
+OK: let-bound linear used once OK
+OK: let-bound linear silent drop rejected
+OK: let-bound linear double-use rejected
+OK: borrowTopParams allows unused linear param
+OK: borrowTopParams multi-use of linear param OK
+OK: let-bound linear silent drop under borrowTop rejected
+OK: double-use under freestanding rejected
+OK: Eq.ndrec under freestanding rejected
+OK: still classic outside withOptions
+qtt_use_check MetaM: all cases passed

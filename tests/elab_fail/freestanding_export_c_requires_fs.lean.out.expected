@@ -1,0 +1,1 @@
+freestanding_export_c_requires_fs.lean:5:2-5:19: error: Invalid `export_c` on `add`: `compiler.freestanding` must be true (freestanding modules only; see K12)

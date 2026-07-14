@@ -8,6 +8,7 @@ module
 prelude
 public import Lean.Compiler.BorrowedAnnotation
 public import Lean.Meta.InferType
+import Lean.Compiler.Freestanding
 import Init.Omega
 import Lean.OriginalConstKind
 
@@ -221,8 +222,13 @@ where
           -- This branch can happen under `backward.privateInPublic`; restore original behavior of
           -- failing here, which is caught and ignored above by `observing`.
           throwError "internal compiler error: private in public"
-        let .inductInfo _ ← getConstInfo declName | return anyExpr
-        pure <| .const declName us
+        -- K18: freestanding scalar axioms must stay as named types (not `lcAny`) so the impure
+        -- type table can map them to unboxed C scalars.
+        if isFreestandingScalarTypeName declName then
+          pure <| .const declName us
+        else
+          let .inductInfo _ ← getConstInfo declName | return anyExpr
+          pure <| .const declName us
       | .fvar .. => pure f
       | _ => return anyExpr
     let mut result := fNew

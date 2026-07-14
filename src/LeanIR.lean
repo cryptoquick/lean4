@@ -166,8 +166,27 @@ public def main (args : List String) : IO UInt32 := do
       return 1
   profileitIO "C code generation" opts do
     let data ← Compiler.LCNF.emitC modName
-      |>.toIO' { fileName := irFile, fileMap := default } { env }
+      |>.toIO' { fileName := irFile, fileMap := default, options := opts } { env }
     out.write data.toUTF8
+    if Compiler.isFreestandingEmit env opts then
+      match Compiler.LCNF.MemSafetyCert.verifyEmbedded data with
+      | .error msg =>
+        throw <| IO.userError s!"freestanding C missing/invalid memory-safety certificate: {msg}"
+      | .ok () =>
+        match Compiler.LCNF.MemSafetyCert.extractCertText? data with
+        | some certText =>
+          IO.FS.writeFile (Compiler.LCNF.MemSafetyCert.sidecarPath c) certText
+        | none =>
+          throw <| IO.userError "freestanding C missing embedded memory-safety certificate block"
+        match Compiler.LCNF.CompCertCert.verifyEmbedded data with
+        | .error msg =>
+          throw <| IO.userError s!"freestanding C missing/invalid CompCert-oriented certificate: {msg}"
+        | .ok () =>
+          match Compiler.LCNF.CompCertCert.extractCertText? data with
+          | some ccText =>
+            IO.FS.writeFile (Compiler.LCNF.CompCertCert.sidecarPath c) ccText
+          | none =>
+            throw <| IO.userError "freestanding C missing embedded CompCert-oriented certificate block"
 
   displayCumulativeProfilingTimes
   if printStats then

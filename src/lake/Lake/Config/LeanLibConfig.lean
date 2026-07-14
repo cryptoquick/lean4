@@ -84,8 +84,27 @@ public configuration LeanLibConfig (name : Name) extends LeanConfig where
   /--
   An `Array` of library facets to build on a bare `lake build` of the library.
   For example, `#[LeanLib.sharedFacet]` will build the shared library facet.
+  For freestanding systems extracts, use `#[LeanLib.freestandingFacet]` or
+  `#[LeanLib.freestandingBundleFacet]` with `freestanding := true`.
   -/
   defaultFacets : Array Name := #[LeanLib.leanArtsFacet]
+
+  /--
+  Whether this library is a freestanding systems extract.
+
+  When `true`:
+  * Modules are compiled with `compiler.freestanding=true` **forced** into
+    `leanOptions` / server options. This is fail-closed: package or library
+    `leanOptions` / `moreServerOptions` cannot set `compiler.freestanding=false`
+    on a freestanding lib (use `freestanding := false` to opt out).
+  * Prefer `defaultFacets := #[LeanLib.freestandingFacet]` for the ordered
+    multi-archive link set, or `#[LeanLib.freestandingBundleFacet]` for a single
+    combined static archive (`lib{name}_bundle.a`) that includes freestanding
+    `needs` deps. Neither injects Lean shared dynlibs.
+
+  Defaults to `false`.
+  -/
+  freestanding : Bool := false
 
   /--
   The module facets to build and combine into the library's static

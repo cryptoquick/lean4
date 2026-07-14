@@ -4,6 +4,7 @@
 .lake
 lake-manifest.json
 /build
+/out
 /src/lakefile.toml
 /lakefile.toml
 GPATH
@@ -24,13 +25,21 @@ settings.json
 !.vscode/tasks.json
 !.vscode/extensions.json
 script/__pycache__
+# Disposable fixture trees for systems gate negatives (trap-cleaned; ignore if leaked)
+script/.tmp-axiom-neg-src/
+script/.tmp-compliant-neg/
 *.produced.out
 CMakeSettings.json
 CppProperties.json
 result
+result-compcert
 fwIn.txt
 fwOut.txt
 wdErr.txt
 wdIn.txt
 wdOut.txt
 .claude/worktrees/
+
+# Local CompCert pin metadata (machine-local; never inside AbsInt submodule)
+/ref/ccomp.PIN.txt
+/ref/CompCert/ccomp.PIN.txt

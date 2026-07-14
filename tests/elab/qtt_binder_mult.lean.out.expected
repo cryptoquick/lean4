@@ -1,0 +1,49 @@
+OK: classic mode isQttMode false by default
+OK: default Nat → ω
+OK: default Prop const → 0
+OK: default sort → 0
+OK: lcErased → 0
+OK: getBinderMultOfType lcErased → 0
+OK: @[linear] resource → 1
+OK: getBinderMultOfType linear → 1
+OK: annotateMult 1 round-trip
+OK: annotateMult 0 round-trip
+OK: annotateMult ω round-trip
+OK: binderMult prefers mdata over type default
+OK: getBinderMultOfType honors annotateMult .one on Nat
+OK: getBinderMultOfType honors annotateMult .zero on linear resource
+OK: ensureExplicitMult adds mdata
+OK: ensureExplicitMult preserves existing
+OK: getBinderMultOfType = binderMultiplicity
+OK: telescope [ω, 0] for Nat → Prop → Nat
+OK: annotateTelescope preserves mults
+OK: telescope domain has explicit mult
+OK: getLocalBinderMult Nat → ω (classic)
+OK: getBinderMult classic local Nat → ω
+OK: Meta getLocalBinderMult unannotated True → 0
+OK: pure getBinderMult unannotated True is ω (no isProp)
+OK: isQttMode under compiler.qtt
+OK: withQttLocalDecl annotates type
+OK: getLocalBinderMult after QTT intro → ω
+OK: getBinderMult matches after mdata
+OK: explicit mult 1 on local
+OK: getBinderMult explicit 1
+OK: QTT intro linear resource → 1
+OK: withQttLetDecl annotates type
+OK: 0-qty rejected at runtime under QTT
+OK: Prop-valued binder → 0
+OK: pure matches Meta after QTT mdata on True
+OK: forallTelescopeQtt dependent arity
+OK: forallTelescopeQtt Nat → ω
+OK: forallTelescopeQtt (n=n) → 0
+OK: dependent prop domain has explicit mult
+OK: binderMultsOfTelescopeExplicit dependent [ω, 0]
+OK: forallTelescopeQtt reducing arity
+OK: forallTelescopeQtt reducing Nat → ω
+OK: forallTelescopeQtt reducing (n=n) → 0
+OK: isQttMode under compiler.freestanding
+OK: withQttLocalDecl under freestanding annotates
+OK: still classic outside withOptions
+OK: classic: checkNotErasedRuntime no-op
+OK: plain withLocalDecl under QTT still has mult via defaults
+qtt_binder_mult: all cases passed

@@ -1,0 +1,4 @@
+[submodule "ref/CompCert"]
+	path = ref/CompCert
+	url = https://github.com/AbsInt/CompCert.git
+	# Pin: v3.16 (matches typical nix pkgs.compcert / result-compcert dogfood)

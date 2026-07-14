@@ -1,0 +1,178 @@
+# Systems Lean — optional gate workflow.
+#
+# Opt-in only: does **not** modify classic ci.yml or force Systems Lean on every PR.
+# Front door: systems.nix → `nix develop .#systems` /
+#   `nix build .#checks.<system>.systems-light` (system-qualified; not bare checks.systems-light).
+# Triggers:
+#   - workflow_dispatch (manual)
+#   - push / pull_request limited to the `systems` branch and Systems Lean paths
+#
+# Default: flake light check is primary when nix is available (fail-closed).
+# Script fallback only when nix install is unavailable — never as a green
+# alternative after a failed pure-sandbox light check.
+# Full systems-validate runs only when stage1 lean is present (usually local/dogfood).
+#
+# Classic master CI is unaffected.
+name: Systems Lean
+
+on:
+  workflow_dispatch:
+    inputs:
+      full_validate:
+        description: "Attempt full systems-validate.sh (SKIP without stage1 lean in checkout)"
+        required: false
+        default: "true"
+        type: string
+  push:
+    branches: [systems]
+    paths:
+      - "script/systems-*.sh"
+      - "script/systems-product-stdlib-modules.txt"
+      - "script/systems-tcb-axiom-allowlist.txt"
+      - "script/systems-compliance-corpus.txt"
+      - "script/lean-systems"
+      - "doc/dev/systems-lean*.md"
+      - "src/Systems/**"
+      - "src/Lean/Compiler/QTT/**"
+      - "src/Lean/Compiler/Multiplicity*.lean"
+      - "src/Lean/Compiler/LCNF/MemSafetyCert.lean"
+      - "src/Lean/Compiler/LCNF/CompCertCert.lean"
+      - "src/Lean/Compiler/LCNF/AffineCheck.lean"
+      - "src/Lean/Compiler/LCNF/EmitC.lean"
+      # Product brand is Systems; compiler mode tables stay in Freestanding.lean (not Systems.lean).
+      - "src/Lean/Compiler/Freestanding.lean"
+      - "tests/lake/examples/systems/**"
+      - "flake.nix"
+      - "systems.nix"
+      - "nix/**"
+      - ".github/workflows/systems-lean.yml"
+  pull_request:
+    branches: [systems]
+    paths:
+      - "script/systems-*.sh"
+      - "script/systems-product-stdlib-modules.txt"
+      - "script/systems-tcb-axiom-allowlist.txt"
+      - "script/systems-compliance-corpus.txt"
+      - "script/lean-systems"
+      - "doc/dev/systems-lean*.md"
+      - "src/Systems/**"
+      - "src/Lean/Compiler/QTT/**"
+      - "src/Lean/Compiler/Multiplicity*.lean"
+      - "src/Lean/Compiler/LCNF/MemSafetyCert.lean"
+      - "src/Lean/Compiler/LCNF/CompCertCert.lean"
+      - "src/Lean/Compiler/LCNF/AffineCheck.lean"
+      - "src/Lean/Compiler/LCNF/EmitC.lean"
+      # Product brand is Systems; compiler mode tables stay in Freestanding.lean (not Systems.lean).
+      - "src/Lean/Compiler/Freestanding.lean"
+      - "tests/lake/examples/systems/**"
+      - "flake.nix"
+      - "systems.nix"
+      - "nix/**"
+      - ".github/workflows/systems-lean.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: systems-lean-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  systems-gates:
+    name: Systems Lean gates (opt-in)
+    runs-on: ubuntu-latest
+    # Never required on classic master default CI; this workflow is path/branch limited.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install nix (optional hermetic Systems tools)
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+        continue-on-error: true
+
+      - name: systems.nix light check (primary when nix available)
+        id: systems_nix
+        run: |
+          set -euo pipefail
+          if ! command -v nix >/dev/null 2>&1; then
+            echo "nix_available=0" >> "$GITHUB_OUTPUT"
+            echo "nix_systems=0" >> "$GITHUB_OUTPUT"
+            echo "NOTE: nix not available; using runner script fallback"
+            exit 0
+          fi
+          echo "nix_available=1" >> "$GITHUB_OUTPUT"
+          # Flake attrs live at checks.<system>.systems-light (not bare checks.systems-light).
+          SYSTEM="$(nix eval --raw --impure --expr 'builtins.currentSystem')"
+          echo "flake system: ${SYSTEM}"
+          # Fail-closed: light-check failure fails this job (no green script fallback).
+          nix build ".#checks.${SYSTEM}.systems-light" --print-build-logs
+          echo "OK: nix build .#checks.${SYSTEM}.systems-light"
+          if nix develop .#systems --command true; then
+            echo "nix_systems=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "nix_systems=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install apt fallback tools (rg, binutils, make)
+        if: steps.systems_nix.outputs.nix_available != '1'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ripgrep binutils make python3 gcc file
+
+      - name: Non-lean-heavy gate suite (script fallback when nix unavailable)
+        if: steps.systems_nix.outputs.nix_available != '1'
+        run: |
+          set -euo pipefail
+          echo "=== Systems Lean light gates (script path; nix unavailable) ==="
+          command -v rg && command -v nm && command -v python3
+          ./script/systems-stdlib-inventory.sh --require
+          ./script/systems-status.sh | tee /tmp/status.out
+          rg -q "SYSTEMS_STATUS_OK=1" /tmp/status.out
+          ./script/systems-product-stdlib-check.sh | tee /tmp/product_stdlib.out
+          rg -qx "PRODUCT_STDLIB_MODULES_OK=1" /tmp/product_stdlib.out
+          ./script/systems-axiom-check.sh | tee /tmp/axiom.out
+          rg -q "AXIOM_AUTO_GATE_OK=1" /tmp/axiom.out
+          ./script/systems-qtt-depth-check.sh | tee /tmp/qtt_depth.out
+          rg -q "QTT_DEPTH_OK=1" /tmp/qtt_depth.out
+          ./script/systems-linear-residual-metrics.sh | tee /tmp/linear.out
+          rg -q "LINEAR_RESIDUAL_METRICS_OK=1" /tmp/linear.out
+          BUNDLE="tests/lake/examples/systems/lib/.lake/build/lib/libfs_extract_bundle.a"
+          if [[ -f "$BUNDLE" && -s "$BUNDLE" ]]; then
+            ./script/systems-par-dual-path-check.sh | tee /tmp/par.out
+            rg -q "PAR_DUAL_PATH_OK=1" /tmp/par.out
+          else
+            echo "SKIP: parallelism dual-path (missing product bundle at $BUNDLE)"
+          fi
+          ./script/systems-tcb-inventory.sh | tee /tmp/tcb.out
+          rg -q "TCB_HONESTY_OK=1" /tmp/tcb.out
+          echo "OK: Systems Lean light gates (script path)"
+
+      - name: Full systems-validate when stage1 lean present
+        # Parenthesized: (dispatch && full_validate) || (not dispatch). Without stage1 → SKIP (not fail).
+        if: (github.event_name == 'workflow_dispatch' && github.event.inputs.full_validate == 'true') || (github.event_name != 'workflow_dispatch')
+        env:
+          USE_NIX: ${{ steps.systems_nix.outputs.nix_systems }}
+          LD_LIBRARY_PATH: /usr/lib:/lib:/usr/lib/x86_64-linux-gnu
+        run: |
+          set -euo pipefail
+          run_cmd() {
+            if [[ "${USE_NIX:-0}" == "1" ]]; then
+              nix develop .#systems --command bash -lc "$*"
+            else
+              bash -lc "$*"
+            fi
+          }
+
+          if [[ -x build/release/stage1/bin/lean ]]; then
+            export PATH="$PWD/build/release/stage1/bin:${PATH:-}"
+            echo "stage1 lean present → full systems-validate"
+            run_cmd 'systems-validate 2>/dev/null || ./script/systems-validate.sh' | tee /tmp/systems-validate.out
+            rg -qE '^SCORE pass=[0-9]+ fail=0( |$)' /tmp/systems-validate.out
+          else
+            echo "SKIP: full systems-validate (no build/release/stage1/bin/lean in this checkout)"
+            echo "NOTE: GH light suite ≠ SCORE pass=N fail=0; run validate locally with stage1."
+            echo "  nix develop .#systems --command systems-validate"
+          fi

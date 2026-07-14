@@ -10,6 +10,8 @@ public import Lean.Compiler.CSimpAttr
 public import Lean.Compiler.ImplementedByAttr
 public import Lean.Compiler.LCNF.Bind
 public import Lean.Compiler.NeverExtractAttr
+public import Lean.Compiler.Options
+public import Lean.Compiler.Freestanding
 import Lean.Meta.CasesInfo
 import Lean.Meta.WHNF
 import Lean.Compiler.NoncomputableAttr
@@ -282,8 +284,11 @@ def toCode (result : Arg .pure) : M (Code .pure) := do
     let fvarId ← mkAuxLetDecl .erased
     seqToCode (← get).seq (.return fvarId)
 
-def run (expectedType : Expr) (x : M α) : CompilerM α :=
-  x.run { expectedType } |>.run' {}
+def run (expectedType : Expr) (x : M α) : CompilerM α := do
+  -- Freestanding affine resources: do not hash-cons identical effectful applications
+  -- (`close fd; close fd` must remain two calls for the affine checker).
+  let fs := (← getEnv).isFreestandingModule || compiler.freestanding.get (← getOptions)
+  x.run { expectedType } |>.run' { shouldCache := !fs }
 
 @[inline]
 def withExpectedType (e : Option Expr) (x : M α) : M α :=

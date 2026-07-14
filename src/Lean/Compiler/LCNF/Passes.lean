@@ -30,6 +30,7 @@ public import Lean.Compiler.LCNF.CoalesceRC
 public import Lean.Compiler.LCNF.Toposort
 public import Lean.Compiler.LCNF.ExpandResetReuse
 public import Lean.Compiler.LCNF.SimpleGroundExpr
+public import Lean.Compiler.LCNF.AffineCheck
 
 public section
 
@@ -92,6 +93,10 @@ open Pass
 def builtinPassManager : PassManager := {
   basePasses := #[
     init,
+    -- S2/N2: freestanding affine ownership (no-op unless freestanding).
+    -- Must run **before** CSE/simp: base LCNF treats externs as pure, so CSE would
+    -- collapse `close fd; close fd` into a single call and hide use-after-move.
+    affineCheckPass,
     pullInstances,
     cse (shouldElimFunDecls := false),
     simp,

@@ -79,6 +79,13 @@ public def libName (self : LeanLib) : String :=
 @[inline] public def staticExportLibFile (self : LeanLib) : FilePath :=
   self.pkg.staticLibDir / self.staticLibFileName.addExtension "export"
 
+/--
+The path to the combined freestanding static archive
+(`lib{name}_bundle.a`) produced by `freestanding.bundle`.
+-/
+@[inline] public def freestandingBundleLibFile (self : LeanLib) : FilePath :=
+  self.pkg.staticLibDir / nameToStaticLib s!"{self.libName}_bundle"
+
 /-- The file name of the library's shared binary (i.e., its `dll`, `dylib`, or `so`) . -/
 @[inline] public def sharedLibFileName (self : LeanLib) : FilePath :=
   nameToSharedLib self.libName
@@ -116,6 +123,14 @@ Otherwise, falls back to the package's.
 @[inline] public def defaultFacets (self : LeanLib) : Array Name :=
   self.config.defaultFacets
 
+/-- Whether this library is marked as a freestanding systems extract. -/
+@[inline] public def isFreestanding (self : LeanLib) : Bool :=
+  self.config.freestanding
+
+/-- Option injected when `freestanding := true` on a Lean library. -/
+public def freestandingLeanOption : LeanOption :=
+  ⟨`compiler.freestanding, true⟩
+
 /-- The library's `nativeFacets` configuration. -/
 @[inline] public def nativeFacets (self : LeanLib) (shouldExport : Bool) : Array (ModuleFacet FilePath) :=
   self.config.nativeFacets shouldExport
@@ -128,6 +143,20 @@ That is, the minimum of package's `buildType` and the library's  `buildType`.
   min self.pkg.buildType self.config.buildType
 
 /--
+Merge freestanding packaging options into a base option set.
+
+When `freestanding := true`, **forces** `compiler.freestanding=true` last
+(via `LeanOptions.appendArray`). This is fail-closed: package/lib `leanOptions`,
+`moreServerOptions`, or build-type options cannot turn freestanding off for a
+freestanding library. To disable freestanding codegen, set `freestanding := false`.
+-/
+@[inline] public def withFreestandingOptions (self : LeanLib) (opts : LeanOptions) : LeanOptions :=
+  if self.isFreestanding then
+    opts ++ #[freestandingLeanOption]
+  else
+    opts
+
+/--
 The arguments to pass to `lean --server` when running the Lean language server.
 `serverOptions` is the accumulation of:
 - the build type's `leanOptions`
@@ -135,11 +164,12 @@ The arguments to pass to `lean --server` when running the Lean language server.
 - the package's `moreServerOptions`
 - the library's `leanOptions`
 - the library's `moreServerOptions`
+- forced `compiler.freestanding=true` when the library is freestanding (not overridable)
 -/
 @[inline] public def serverOptions (self : LeanLib) : LeanOptions :=
-  ({} : LeanOptions) ++ self.buildType.leanOptions ++ self.pkg.moreServerOptions ++
-  self.config.leanOptions ++ self.config.moreServerOptions
-
+  self.withFreestandingOptions <|
+    ({} : LeanOptions) ++ self.buildType.leanOptions ++ self.pkg.moreServerOptions ++
+    self.config.leanOptions ++ self.config.moreServerOptions
 /--
 The backend type for modules of this library.
 Prefer the library's `backend` configuration, then the package's,
@@ -185,13 +215,15 @@ The targets of the package plus the targets of the library (in that order).
 
 /--
 The arguments to pass to `lean` when compiling the library's Lean files.
-`leanArgs` is the accumulation of:
+`leanOptions` is the accumulation of:
 - the build type's `leanOptions`
 - the package's `leanOptions`
 - the library's `leanOptions`
+- forced `compiler.freestanding=true` when the library is freestanding (not overridable via those options)
 -/
 @[inline] public def leanOptions (self : LeanLib) : LeanOptions :=
-  self.buildType.leanOptions ++ self.pkg.leanOptions ++ self.config.leanOptions
+  self.withFreestandingOptions <|
+    self.buildType.leanOptions ++ self.pkg.leanOptions ++ self.config.leanOptions
 
 /--
 The arguments to pass to `lean` when compiling the library's Lean files.

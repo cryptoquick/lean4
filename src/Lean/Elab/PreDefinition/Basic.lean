@@ -7,6 +7,8 @@ module
 
 prelude
 public import Lean.Compiler.NoncomputableAttr
+public import Lean.Compiler.Multiplicity
+public import Lean.Compiler.QTT.UseCheck
 public import Lean.Util.NumApps
 public import Lean.Meta.Eqns
 public import Lean.Elab.RecAppSyntax
@@ -176,6 +178,38 @@ def addPreDefInfo (preDef : PreDefinition) : TermElabM Unit := do
     addTermInfo' preDef.ref (← mkConstWithLevelParams preDef.declName) (isBinder := true)
 
 
+/-- True for freestanding exclusive affine selectors (`bifArena` / `bifMMap`).
+
+Bodies are `Bool.casesOn` over two distinct linear params (return one arm). QTT path merge
+rejects that shape; LCNF AffineCheck owns region ownership. Skip elaborator use-check for
+these definitions only. -/
+private def isFsAffineExclusiveBif (declName : Name) : Bool :=
+  match declName with
+  | .str _ "bifArena" | .str _ "bifMMap" => true
+  | _ => false
+
+/--
+Under `isQttMode`, run elaborator-time QTT use/split checking on a definition value.
+Theorems / Prop-valued decls are skipped (erased at runtime). Classic Lean: no-op.
+Skips type formers (e.g. freestanding `Sys`) and trusted `bifArena`/`bifMMap` selectors.
+-/
+private def checkQttUsesOfPreDef (preDef : PreDefinition) : TermElabM Unit := do
+  let env ← getEnv
+  let opts ← getOptions
+  unless Compiler.isQttMode env opts do return
+  match preDef.kind with
+  | .theorem => return
+  | _ =>
+    if (← Meta.isProp preDef.type) then return
+    -- Skip decls whose type is a type former (`Type → Type`, …), e.g. freestanding `Sys`.
+    -- Those definitions are not runtime value pipelines (value-level 0-qty params still go
+    -- through `checkQttUses` on ordinary defs).
+    if (← Meta.isTypeFormerType preDef.type) then return
+    -- Trusted exclusive affine select macros (see `isFsAffineExclusiveBif`).
+    if isFsAffineExclusiveBif preDef.declName then return
+    let borrow := preDef.modifiers.attrs.any fun a => a.name == `fs_borrow
+    Compiler.QTT.checkQttUsesDecl preDef.value (borrowTopParams := borrow)
+
 private def addNonRecAux (docCtx : LocalContext × LocalInstances) (preDef : PreDefinition) (compile : Bool)
     (all : List Name) (applyAttrAfterCompilation := true) (cacheProofs := true) (cleanupValue := false)
     (isRecursive := false) : TermElabM Unit :=
@@ -183,6 +217,7 @@ private def addNonRecAux (docCtx : LocalContext × LocalInstances) (preDef : Pre
     let preDef ← abstractNestedProofs (cache := cacheProofs) preDef
     let preDef ← letToHaveType preDef
     let preDef ← if cleanupValue then letToHaveValue preDef else pure preDef
+    checkQttUsesOfPreDef preDef
     let mkDefDecl : TermElabM Declaration :=
       return Declaration.defnDecl {
           name := preDef.declName, levelParams := preDef.levelParams, type := preDef.type, value := preDef.value
@@ -258,6 +293,8 @@ def addAndCompileUnsafe
     TermElabM Unit := do
   let preDefs ← preDefs.mapM fun d => eraseRecAppSyntax d
   withRef preDefs[0]!.ref do
+    for preDef in preDefs do
+      checkQttUsesOfPreDef preDef
     let all  := preDefs.toList.map (·.declName)
     let decl := Declaration.mutualDefnDecl <| ← preDefs.toList.mapM fun preDef => return {
         name        := preDef.declName

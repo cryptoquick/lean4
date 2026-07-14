@@ -7,11 +7,15 @@ module
 
 prelude
 public import Lean.Compiler.LCNF.PassManager
+public import Lean.Compiler.NeverExtractAttr
 
 /-!
 This module implements a pass that does a syntactic use-def check for all let/fun/jp bindings and
 removes them if they are unused. Note that in impure mode not all unused let bindings can be removed safely
 so we opt for a safe subset.
+
+Freestanding Sys/effect ops tagged `@[never_extract]` are never eliminated in pure mode either
+(S2: open/close/read/write must survive to codegen after the affine checker).
 -/
 
 namespace Lean.Compiler.LCNF
@@ -52,15 +56,23 @@ abbrev collectLetValueM (e : LetValue pu) : M Unit :=
 abbrev collectFVarM (fvarId : FVarId) : M Unit :=
   modify (·.insert fvarId)
 
-def LetValue.safeToElim (val : LetValue pu) : Bool :=
+/--
+Whether an unused let binding may be deleted. Pure LCNF treats most values as free of effects;
+`@[never_extract]` declarations (freestanding Sys ops, dbg_trace, …) must stay.
+-/
+def LetValue.safeToElim (env : Environment) (val : LetValue pu) : Bool :=
+  let isNeverExtractConst (n : Name) : Bool := hasNeverExtractAttribute env n
   match pu with
-  | .pure => true
+  | .pure =>
+    match val with
+    | .const n _ _ _ => !isNeverExtractConst n
+    | _ => true
   | .impure =>
     match val with
     | .ctor .. | .reset .. | .reuse .. | .oproj .. | .uproj .. | .sproj .. | .lit .. | .pap ..
     | .box .. | .unbox .. | .erased .. | .isShared .. => true
-    -- 0-ary full applications are considered constants
-    | .fap _ args => args.isEmpty
+    -- 0-ary full applications are considered constants unless never_extract
+    | .fap n args => args.isEmpty && !isNeverExtractConst n
     | .fvar .. => false
 
 mutual
@@ -73,7 +85,8 @@ partial def Code.elimDead (code : Code pu) : M (Code pu) := do
   match code with
   | .let decl k =>
     let k ← k.elimDead
-    if (← get).contains decl.fvarId || !decl.value.safeToElim then
+    let env ← getEnv
+    if (← get).contains decl.fvarId || !decl.value.safeToElim env then
       /- Remark: we don't need to collect `decl.type` because LCNF local declarations do not occur in types. -/
       collectLetValueM decl.value
       return code.updateCont! k

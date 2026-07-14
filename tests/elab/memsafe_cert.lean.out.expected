@@ -1,0 +1,20 @@
+OK: QTT 1+1=ω
+OK: QTT 0*ω=0
+OK: QTT 1*ω=ω
+OK: QTT 0≤1≤ω
+OK: QTT linear may not discard
+OK: QTT ω may discard
+OK: QTT 0 not runtime
+OK: positive memsafe verifyEmbedded
+OK: positive has qtt_zero_quantity_erased claim
+OK: positive has qtt_linear_resources claim
+OK: positive CompCert-oriented verifyEmbedded
+OK: positive CompCert requires memsafe
+OK: positive seal without trailing newline
+OK: negative missing memsafe cert
+OK: negative cannot certify lean_object
+OK: negative c_digest mismatch
+OK: negative bad memsafe sig
+OK: negative missing qtt_zero_quantity_erased
+OK: negative CompCert requires MemSafetyCert
+memsafe_cert: all cases passed (QTT + CompCert)

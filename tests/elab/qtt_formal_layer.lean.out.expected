@@ -1,0 +1,95 @@
+Lean.Compiler.Multiplicity.Theorems.algebraChecked : Bool
+Lean.Compiler.Multiplicity.Theorems.freeSafetyChecked : Bool
+Lean.Compiler.Multiplicity.Theorems.productResidualMultPolicyChecked : Bool
+Lean.Compiler.QTT.Theorems.multAlgebraChecked : Bool
+Lean.Compiler.QTT.Theorems.algebraChecked : Bool
+Lean.Compiler.QTT.Theorems.productResidualMultPolicyChecked : Bool
+Lean.Compiler.QTT.FreeSafety.freeSafetyChecked : Bool
+Lean.Compiler.QTT.FreeSafety.freeSafetyFormalLayerChecked : Bool
+Lean.Compiler.QTT.FreeSafety.productResidualMultPolicyChecked : Bool
+Lean.Compiler.LCNF.MemSafetyCert.Theorems.claimInventoryChecked : Bool
+Lean.Compiler.LCNF.CompCertCert.Theorems.claimInventoryChecked : Bool
+OK: Multiplicity.Theorems.algebraChecked
+OK: Multiplicity.Theorems.freeSafetyChecked
+OK: Multiplicity.Theorems.productResidualMultPolicyChecked
+OK: QTT.Theorems.multAlgebraChecked
+OK: QTT.Theorems.algebraChecked
+OK: QTT.Theorems.freeSafetyChecked
+OK: QTT.Theorems.productResidualMultPolicyChecked
+OK: QTT.FreeSafety.freeSafetyChecked
+OK: QTT.FreeSafety.freeSafetyFormalLayerChecked
+OK: QTT.FreeSafety.productResidualMultPolicyChecked
+OK: QTT.FreeSafety.linearExactOncePolicy
+OK: QTT.FreeSafety.zeroQtyErasedPolicy
+OK: QTT.FreeSafety.zeroQtyNonRuntimePolicy
+OK: QTT.FreeSafety.zeroMulAnnihilatesPolicy
+OK: QTT.FreeSafety.omegaUnrestrictedPolicy
+OK: QTT.FreeSafety.affineResourceLinearPolicy
+OK: QTT.FreeSafety.partitionOwnershipLinearPolicy
+OK: affine emphasizes second-use none
+OK: partition emphasizes requireLinear + post-consume not linear
+OK: QTT.FreeSafety.memsafeFreeSafetyClaimsPresent
+OK: QTT.FreeSafety.productFreeSafetyPolicies
+OK: QTT.FreeSafety.omegaRepeatedUseStable
+OK: QTT.FreeSafety.linearExactOnceChain
+OK: add 1+1=ω
+OK: mul 0*1=0
+OK: mul 0*ω=0
+OK: mul 1*ω=ω
+OK: add 0+1=1
+OK: add 1+0=1
+OK: mul ω*ω=ω
+OK: add comm 1+ω
+OK: mul comm 0*ω
+OK: add assoc 1+1+1
+OK: mul assoc 1*ω*ω
+OK: left distrib 1*(1+1)
+OK: left distrib ω*(1+1)
+OK: right distrib (1+1)*1
+OK: le refl ω
+OK: not le 1≤0
+OK: not le ω≤1
+OK: not le ω≤0
+OK: le chain 0≤1≤ω
+OK: requireLinear one
+OK: isLinear one
+OK: isErased zero
+OK: isUnrestricted ω
+OK: le 0≤1≤ω
+OK: mayDiscard one=false
+OK: mayDiscard omega=true
+OK: mayDiscard zero=true
+OK: isRuntime zero=false
+OK: useOnce one=some zero
+OK: useOnce zero=none
+OK: linear second use impossible
+OK: isErased one=false
+OK: isErased omega=false
+OK: isLinear zero=false
+OK: isLinear omega=false
+OK: isRuntime omega
+OK: requireLinear omega
+OK: requireLinear zero=false
+OK: lt 0<1
+OK: lt 1<ω
+OK: not lt 1<1
+OK: mul 1*0=0
+OK: mul ω*0=0
+OK: add 0+0=0
+OK: add table 0/1/ω
+OK: mul table 0/1/ω
+OK: add comm 0+1
+OK: mul comm 0+1
+OK: zero mul annihilates
+OK: mul 0*0=0
+OK: omega repeated useOnce stable
+OK: multToNat 0/1/ω
+OK: multFromNat? 0/1/2/3
+OK: memsafe claim inventory marker
+OK: compcert claim inventory marker
+OK: memsafe requires qtt_zero_quantity_erased
+OK: memsafe requires qtt_linear_resources_exact_once
+OK: memsafe requires qtt_omega_unrestricted_scalars
+OK: compcert requires memsafe prerequisite claim
+OK: compcert requires qtt_zero_quantity_erased
+qtt_formal_layer: all markers ok

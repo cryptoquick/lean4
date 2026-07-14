@@ -136,6 +136,70 @@ public def compileStaticLib
   let args := args.push libFile.toString ++ (← mkArgs libFile <| oFiles.map toString)
   proc {cmd := ar.toString, args}
 
+/--
+Whether an `ar` archive member name looks like a symbol-table / special member
+rather than a relocatable object we should repack.
+-/
+private def isArSpecialMember (name : String) : Bool :=
+  name == "/" || name == "//" || name.startsWith "__.SYMDEF"
+
+/--
+Combine multiple static archives into one by extracting objects and re-packing.
+
+Portable path: `ar x` each input into a temp dir, rename members uniquely (so
+duplicate basenames across archives do not collide), then `ar rcs` the combined
+output. Avoids thin-archive / GNU-only `ar` features.
+
+If `archives` is a singleton, copies that archive to `libFile` (no extract).
+-/
+public def combineStaticLibs
+  (libFile : FilePath) (archives : Array FilePath)
+  (ar : FilePath := "ar")
+: LogIO Unit := do
+  createParentDirs libFile
+  removeFileIfExists libFile
+  if archives.isEmpty then
+    error "combineStaticLibs: empty archive list"
+  if h : archives.size = 1 then
+    copyFile archives[0] libFile
+    return
+  let tmpRoot := FilePath.mk (libFile.toString ++ ".combine-tmp")
+  removeDirAllIfExists tmpRoot
+  IO.FS.createDirAll tmpRoot
+  try
+    let mut oFiles : Array FilePath := #[]
+    let mut idx : Nat := 0
+    for archive in archives do
+      unless (← archive.pathExists) do
+        error s!"combineStaticLibs: missing archive '{archive}'"
+      let extractDir := tmpRoot / s!"a{idx}"
+      IO.FS.createDirAll extractDir
+      -- Extract into extractDir via cwd; use absolute archive path for reliability.
+      let absArchive ← IO.FS.realPath archive
+      proc {
+        cmd := ar.toString
+        args := #["x", absArchive.toString]
+        cwd := extractDir
+      }
+      let ents ← extractDir.readDir
+      for ent in ents do
+        let mdata ← ent.path.metadata
+        unless mdata.type == .file do
+          continue
+        let base := ent.fileName
+        if isArSpecialMember base then
+          continue
+        -- Unique flat name: index prefix avoids basename collisions across archives.
+        let unique := tmpRoot / s!"{idx}_{base}"
+        IO.FS.rename ent.path unique
+        oFiles := oFiles.push unique
+      idx := idx + 1
+    if oFiles.isEmpty then
+      error s!"combineStaticLibs: no object members extracted from {archives.size} archive(s)"
+    compileStaticLib libFile oFiles ar
+  finally
+    removeDirAllIfExists tmpRoot
+
 def getMacOSXDeploymentEnv : BaseIO (Array (String × Option String)) := do
   -- It is difficult to identify the correct minor version here, leading to linking warnings like:
   -- `ld64.lld: warning: /usr/lib/system/libsystem_kernel.dylib has version 13.5.0, which is newer than target minimum of 13.0.0`

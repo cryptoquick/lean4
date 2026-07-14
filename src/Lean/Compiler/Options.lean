@@ -51,4 +51,21 @@ register_builtin_option compiler.inLeanIR : Bool := {
   descr := "Internal. Indicates whether the compiler is currently running in `leanir`."
 }
 
+register_builtin_option compiler.freestanding : Bool := {
+  defValue := false
+  descr := "Freestanding extract: closed imports, fail closed on object/RC/init, C emit without Lean runtime"
+}
+
+register_builtin_option compiler.qtt : Bool := {
+  defValue := false
+  descr := "Enable QTT multiplicity checking (0/1/ω). Implied by compiler.freestanding. \
+Classic Lean is unchanged when this and freestanding are false."
+}
+
+register_builtin_option compiler.systemsSelfHost : Bool := {
+  defValue := false
+  descr := "Systems Lean self-host product path: prefer freestanding AOT without mandatory GC/RC. \
+Does not deprecate the classic runtime; default builds ignore this option."
+}
+
 end Lean.Compiler

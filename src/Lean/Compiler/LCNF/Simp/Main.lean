@@ -12,11 +12,18 @@ public import Lean.Compiler.LCNF.Simp.Used
 public import Lean.Compiler.LCNF.Simp.DefaultAlt
 public import Lean.Compiler.LCNF.Simp.SimpValue
 public import Lean.Compiler.LCNF.Simp.ConstantFold
+public import Lean.Compiler.NeverExtractAttr
 
 public section
 
 namespace Lean.Compiler.LCNF
 namespace Simp
+
+/-- True if the let value is a `@[never_extract]` application (effectful; keep even if unused). -/
+private def isNeverExtractLetValue (v : LetValue .pure) : CompilerM Bool :=
+  match v with
+  | .const declName .. => return hasNeverExtractAttribute (← getEnv) declName
+  | _ => return false
 
 /--
 Return `true` if `c` has only one exit point.
@@ -257,6 +264,10 @@ partial def simp (code : Code .pure) : SimpM (Code .pure) := withIncRecDepth do
     else
       let k ← simp k
       if (← isUsed decl.fvarId) then
+        markUsedLetDecl decl
+        return code.updateLet! decl k
+      else if (← isNeverExtractLetValue decl.value) then
+        -- Keep effectful never_extract apps (e.g. freestanding Sys write) even if result unused
         markUsedLetDecl decl
         return code.updateLet! decl k
       else

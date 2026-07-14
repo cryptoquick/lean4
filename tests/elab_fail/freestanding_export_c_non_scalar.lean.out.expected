@@ -1,0 +1,2 @@
+freestanding_export_c_non_scalar.lean:8:2-8:24: error: Invalid `export_c` on `bad`: signature must use only freestanding scalar types (Systems.Scalars.U64/USize/…)
+freestanding_export_c_non_scalar.lean:9:11-9:14: error(lean.unknownIdentifier): Unknown constant `lcAny`

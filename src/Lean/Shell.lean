@@ -538,6 +538,11 @@ def shellMain (args : List String) (opts : ShellOptions) : IO UInt32 := do
     else
       pure contents
   let setup? ← opts.setupFileName?.mapM ModuleSetup.load
+  -- Merge setup.json options (e.g. Lake leanOptions) so emitC sees them (compiler.freestanding).
+  let leanOpts :=
+    match setup? with
+    | some setup => opts.leanOpts.mergeBy (fun _ _ setupOpt => setupOpt) setup.options.toOptions
+    | none => opts.leanOpts
   let mainModuleName ←
     if let some setup := setup? then
       pure setup.name
@@ -549,7 +554,7 @@ def shellMain (args : List String) (opts : ShellOptions) : IO UInt32 := do
           throw e
     else
       pure `_stdin
-  let env? ← Elab.runFrontend contents opts.leanOpts fileName mainModuleName
+  let env? ← Elab.runFrontend contents leanOpts fileName mainModuleName
     opts.trustLevel opts.oleanFileName? opts.ileanFileName? opts.jsonOutput opts.errorOnKinds
     #[] opts.printStats setup?
     (incrSaveFileName? := opts.incrSaveFileName?)
@@ -557,15 +562,35 @@ def shellMain (args : List String) (opts : ShellOptions) : IO UInt32 := do
     (incrHeaderSaveFileName? := opts.incrHeaderSaveFileName?)
   if let some env := env? then
     if opts.run then
-      return ← runMain env opts.leanOpts args
+      return ← runMain env leanOpts args
     if let some c := opts.cFileName? then
       let .ok out ← IO.FS.Handle.mk c .write |>.toBaseIO
         | IO.eprintln s!"failed to create '{c}'"
           return 1
-      profileitIO "C code generation" opts.leanOpts do
+      profileitIO "C code generation" leanOpts do
         let data ← Compiler.LCNF.emitC mainModuleName
-          |>.toIO' { fileName, fileMap := default } { env }
+          |>.toIO' { fileName, fileMap := default, options := leanOpts } { env }
         out.write data.toUTF8
+        -- Freestanding product C must carry a memory-safety certificate (embedded by emitC).
+        if Compiler.isFreestandingEmit env leanOpts then
+          match Compiler.LCNF.MemSafetyCert.verifyEmbedded data with
+          | .error msg =>
+            throw <| IO.userError s!"freestanding C missing/invalid memory-safety certificate: {msg}"
+          | .ok () =>
+            match Compiler.LCNF.MemSafetyCert.extractCertText? data with
+            | some certText =>
+              IO.FS.writeFile (Compiler.LCNF.MemSafetyCert.sidecarPath c) certText
+            | none =>
+              throw <| IO.userError "freestanding C missing embedded memory-safety certificate block"
+            match Compiler.LCNF.CompCertCert.verifyEmbedded data with
+            | .error msg =>
+              throw <| IO.userError s!"freestanding C missing/invalid CompCert-oriented certificate: {msg}"
+            | .ok () =>
+              match Compiler.LCNF.CompCertCert.extractCertText? data with
+              | some ccText =>
+                IO.FS.writeFile (Compiler.LCNF.CompCertCert.sidecarPath c) ccText
+              | none =>
+                throw <| IO.userError "freestanding C missing embedded CompCert-oriented certificate block"
     if let some bc := opts.bcFileName? then
       initLLVM
       profileitIO "LLVM code generation" opts.leanOpts do
