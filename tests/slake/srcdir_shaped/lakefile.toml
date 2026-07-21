@@ -1,0 +1,14 @@
+name = "srcdir_shaped"
+version = "0.1.0"
+# Lake-style source root: modules live under src/, not package root.
+srcDir = "src"
+# Declaration order lists Host before Foo.Bar so pure chain topo would emit Host first.
+# Host.lean meta-imports Foo.Bar under src/Foo/Bar.lean — import-scan + srcDir + dotted
+# path resolution must place Foo.Bar before Host.
+defaultTargets = ["Host", "Foo.Bar"]
+
+[[lean_lib]]
+name = "Host"
+
+[[lean_lib]]
+name = "Foo.Bar"

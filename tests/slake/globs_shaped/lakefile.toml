@@ -1,0 +1,10 @@
+name = "globs_shaped"
+version = "0.1.0"
+# No defaultTargets — plan modules expand from lean_lib globs (A24/A25).
+# No package-level srcDir — modules resolve only via per-lib srcDir.
+# Recursive multi-level: Core + Core.Extra + Core.Nested.Deep.
+
+[[lean_lib]]
+name = "Lib"
+srcDir = "lib"
+globs = ["Core.*"]

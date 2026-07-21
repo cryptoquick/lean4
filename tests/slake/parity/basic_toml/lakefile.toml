@@ -1,6 +1,11 @@
 name = "basic_toml"
 version = "0.1.0"
 defaultTargets = ["BasicToml"]
+testDriver = "basicTomlTest"
 
 [[lean_lib]]
 name = "BasicToml"
+
+[[lean_exe]]
+name = "basicTomlTest"
+root = "BasicTomlTest"

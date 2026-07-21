@@ -1,0 +1,14 @@
+name = "parallel_shaped"
+version = "0.1.0"
+# Independent roots A and B (no mutual import); Top imports both so plan waves
+# are wave1 A||B then wave2 Top when SLAKE_NATIVE_OLEAN_JOBS≥2.
+defaultTargets = ["Top", "A", "B"]
+
+[[lean_lib]]
+name = "Top"
+
+[[lean_lib]]
+name = "A"
+
+[[lean_lib]]
+name = "B"

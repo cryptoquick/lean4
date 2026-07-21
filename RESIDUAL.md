@@ -1,6 +1,501 @@
 # Systems Lean residual tracker
 
-**Updated:** 2026-07-20  
+## Current residual (product-first) — 2026-07-21
+
+**Shipped this session (A3 + A4 + A5 + A6 + A7 + A8 multi-module sequential host-lean + olean LEAN_PATH + A9 mtime/plan-edge cascade cache invalidation + A10 FNV-1a 64 source content-hash sidecar + NATIVE_BUILD skip-lake + A11 plan-node transitive deps-hash + A12 parallel native olean JOBS + A13 host shared-lib link subset + A14 host package link graph subset + A15 host freestanding-adjacent product seal subset + A16 per-lib roots/srcDir import residual + A17 clean native product out dir wipe + A18 multi-line roots/defaultTargets arrays + A19 host lean C-output emit subset + A20 host object compile of lean C + A21 host leanc IR shared-lib link + A22 host static archive of plan-module objects + A23 host leanc executable link of plan-module objects + stub main + Lean runtime + A24 per-lib globs subset for plan expansion + A25 recursive multi-level per-lib glob expansion + A26 path [[require]] LEAN_PATH + path-dep olean precompile + A27 path-dep → root olean cascade invalidation + A28 path-dep source-hash fold into A11 deps-line + A29 sibling confining `../path` require + A30 package-transitive plan subset + A31 freestanding-adjacent path-dep plan-module C/OBJ into IR products + A32 freestanding-adjacent path-dep plan-module nodes in NATIVE_GRAPH + NATIVE_SEAL + A33 freestanding-adjacent path-require package `.slake-native` wipe on clean + A34 freestanding-adjacent plan-module object inventory in NATIVE_GRAPH + NATIVE_SEAL + A35 freestanding-adjacent plan-module C source inventory in NATIVE_GRAPH + NATIVE_SEAL) — complete (parity green + smokes + living claim honesty):**
+- **A3 — reduce pure lake cosplay on CLAIMED `build` plan path:** package-derived freestanding DepGraph plan from real `lakefile.toml` identity (not demo-only C→B→A).
+  - `Slake.Config`: extract `defaultTargets` **names** + `leanLibNames`; `planNodes` / `formatPlanNodes`.
+  - Option C `slake_fs_depgraph.c`: `chain_topo(n)` + `chain_out_at` (declaration-order fallback); demo C→B→A retained behind `SLAKE_DEPGRAPH_DEMO=1`.
+  - `SLAKE_DEPGRAPH=1` → print `slake depgraph plan: <pkg> <targets…>` then lake.
+  - `SLAKE_PLAN_ONLY=1` → print plan and **skip lake** (exit 0) — real dry-run reduction of lake spawn.
+  - Smokes: `depgraph_cli_smoke.sh` (package plan golden `basic_toml BasicToml`), `plan_only_smoke.sh` (no `.lake/build`).
+- **A4 — dogfood Systems-shaped package:** `tests/slake/systems_shaped` (Host+Core multi-target TOML) + `systems_plan_smoke.sh`.
+- **A5 — real multi-module import-scan DAG plan (product-first):**
+  - Scan resolved `<planNode>.lean` for top-level `import` / `public import` / `import all` / `meta import` lines (fail-closed; not full Lean parser).
+  - Edges among plan nodes only (`T → M` when `M` imports `T`); external imports ignored.
+  - Option C: `edge_clear` / `edge_add` / `edges_topo(n)` → freestanding Kahn; empty edges → chain fallback.
+  - Host unlinked PLAN_ONLY: host Kahn with same edges.
+  - `systems_shaped`: `defaultTargets = ["Host","Core"]` (Host first) + `Host.lean` `import Core` → plan `systems_shaped Core Host`.
+  - Smoke: `import_dag_smoke.sh` (STRICT via `SLAKE_IMPORT_DAG_SMOKE_STRICT=1`).
+- **A6 — deeper import path resolution (srcDir + dotted modules) — product-first:**
+  - Parse optional package-level `srcDir = "…"` into `PackageIdentity.srcDir` (fail-closed; empty / absolute / `..` components → absent).
+  - `isSafeSrcDir` / `isSafeModName` path confinement: refuse absolute joins and `..` so import-scan cannot `readFile` outside `pkg`.
+  - `moduleRelFile` / `moduleRootPath` / `resolveModulePath`: `Foo.Bar` → `Foo/Bar.lean`; preferred `pkg[/srcDir]/rel` with flat package-root fallback (incl. literal-dotted `pkg/Foo.Bar.lean` candidate).
+  - Import-scan uses resolved paths (both freestanding + host Kahn); edges still among plan nodes only; `meta import` accepted.
+  - `formatIdentity` prints `srcDir=…` when present; plan banners claim **srcDir/nested path resolution used** only when `srcDir` present or a dotted plan node is used (flat packages stay plain import-scan wording).
+  - Fixture: `tests/slake/srcdir_shaped` (`srcDir = "src"`, `meta import Foo.Bar` → `src/Foo/Bar.lean`) → plan `srcdir_shaped Foo.Bar Host`.
+  - Smoke: `srcdir_plan_smoke.sh` (STRICT via `SLAKE_SRCDIR_PLAN_SMOKE_STRICT=1`) + path-escape cases (`srcDir=..`, absolute `srcDir`).
+  - Flat packages (`basic_toml`, `systems_shaped`) stay green via fallback.
+- **A7 — thin sequential host-lean typecheck opt-in (product-first; not CLAIMED):**
+  - `SLAKE_NATIVE_CHECK=1` **implies plan print** (reuses A3–A6 topo-ordered plan nodes).
+  - After successful plan: walk ordered nodes; **skip** package `name` node; resolve via `resolveModulePath` (srcDir + dotted + confinement).
+  - Spawn classic `IO.Process` → host `lean <file>` (`LEAN` env or `lean` on PATH; `cwd=pkg`; child `LEAN_PATH` = package root [+ safe srcDir] prepended to existing).
+  - Missing lean / missing module file: soft warn + skip unless `SLAKE_NATIVE_CHECK_STRICT=1` (fail-closed).
+  - Nonzero lean exit → process exit nonzero; names the failing module.
+  - Interactions: `PLAN_ONLY=1` alone → plan + skip lake (unchanged); `PLAN_ONLY=1` + `NATIVE_CHECK=1` → plan + sequential lean check + **still no lake**; `NATIVE_CHECK=1` without PLAN_ONLY → plan + check then lake.
+  - Smoke: `native_check_smoke.sh` on `basic_toml` (single root, no package-local imports; STRICT via `SLAKE_NATIVE_CHECK_SMOKE_STRICT=1`).
+  - Honesty: **thin sequential host-lean typecheck subset** — **not** freestanding build TCB / **not** olean orchestration / **not** lake-compatible multi-module compile / **not** CLAIMED expansion.
+  - Residual (closed by A8): multi-module packages that import siblings fail without oleans under A7 alone (`systems_shaped` Host → Core).
+- **A8 — multi-module sequential host-lean + olean LEAN_PATH (product-first; not CLAIMED):**
+  - `SLAKE_NATIVE_OLEAN=1` **implies plan print** (reuses A3–A6 topo-ordered plan nodes).
+  - After successful plan: walk ordered nodes; **skip** package `name` node; resolve via `resolveModulePath`.
+  - Spawn classic `IO.Process` → host `lean -o <pkg>/.slake-native/<Mod>.olean [-R srcDir] <file>` with `cwd=pkg`; child `LEAN_PATH` = **`.slake-native` first** then pkg [+ safe srcDir] so later modules import earlier oleans.
+  - Package-local out dir `.slake-native/` — **not** claiming lake `.lake/build` compatibility; nested modules → `Foo/Bar.olean`.
+  - Missing lean / missing module file: soft warn + skip unless `SLAKE_NATIVE_OLEAN_STRICT=1` (fail-closed).
+  - Nonzero lean exit → process exit nonzero; names the failing module.
+  - When both NATIVE_OLEAN and NATIVE_CHECK set: olean compile runs (superset); thin typecheck skipped.
+  - Interactions: `PLAN_ONLY=1` + `NATIVE_OLEAN=1` → plan + sequential olean compile + **still no lake**; `NATIVE_OLEAN=1` without PLAN_ONLY → plan + olean compile then lake.
+  - Smoke: `native_olean_smoke.sh` on `systems_shaped` (Core before Host; Host imports Core via olean; STRICT via `SLAKE_NATIVE_OLEAN_SMOKE_STRICT=1`) + residual contrast that A7 alone may fail Host without oleans.
+  - Honesty: **multi-module sequential host-lean + olean LEAN_PATH subset** — **not** freestanding build TCB / **not** lake-equivalent TCB / **not** CLAIMED expansion / **not** full olean graph/cache invalidation like Lake.
+- **A9 — mtime + plan-edge cascade cache invalidation on NATIVE_OLEAN (product-first; not CLAIMED):**
+  - Extends A8 `runNativeOleanCompile`: skip recompile when olean is a regular file and `mtime(olean) ≥ mtime(source)`.
+  - **Cascade (this-run):** track modules recompiled **or soft-skipped** this run; before skip, if any plan-node import dependency (A5 edges) is in that set, force rebuild (topo → transitive). Soft-skip messages note dependents cascade.
+  - **Cascade (cross-run / interrupted):** if any plan-import dep olean is a regular file **newer than** this module's olean, force rebuild (closes Core rebuilt / Host skipped mid-run residual without claiming Lake shake).
+  - Logs: `native olean: skip <mod> (fresh)` vs `native olean: lean -o …`.
+  - `SLAKE_NATIVE_OLEAN_FORCE=1` always rebuilds all plan modules (ignore mtime freshness). Deleting `.slake-native/` also forces full compile.
+  - Smoke: `native_olean_cache_smoke.sh` on `systems_shaped` (Run1 compile → Run2 skip both → content-edit Core → Core+Host cascade (A10: bare touch is hash-fresh) → FORCE rebuild all → dep-olean-newer cross-run band; STRICT via `SLAKE_NATIVE_OLEAN_CACHE_SMOKE_STRICT=1`).
+  - Honesty: **mtime + plan-edge cascade cache invalidation subset** — **not** freestanding build TCB / **not** lake-equivalent shake/hash TCB / **not** CLAIMED / **not** full content-hash or transitive lake package deps / **not** full olean graph invalidation.
+  - Residual closed by **A17:** package-local `.slake-native/` is wiped by `slake clean` (native product out dir wipe subset with `.lake/build`).
+- **A10 — FNV-1a 64 source content-hash sidecar + freestanding-adjacent NATIVE_BUILD (product-first; not CLAIMED):**
+  - **(A) Content-hash:** after successful `lean -o`, write sidecar `.slake-native/<Mod>.olean.slakehash` with `fnv1a64 <16-hex> <mod>` (FNV-1a 64 over full source file bytes).
+  - Skip recompile when no FORCE/cascade/dep-olean-newer and either A9 mtime-fresh **or** olean exists as a regular file **and** current source FNV-1a 64 matches sidecar (touch-without-edit → `skip <mod> (hash-fresh)` even if mtime is newer). Orphan sidecar without olean → rebuild (not hash-fresh).
+  - Rebuild when FORCE, this-run recompiled/soft-skip cascade, dep-olean-newer, missing olean, or mtime stale without matching hash.
+  - Cascade still works: content-edit Core → Core rebuild + Host cascade (hash mismatch forces Core; Host follows this-run recompiled set).
+  - **(B) NATIVE_BUILD:** `SLAKE_NATIVE_BUILD=1` implies plan + NATIVE_OLEAN compile (A8–A10 cache); on **successful** olean compile (lean present; ≥1 module compiled or skipped-fresh) **skip lake** (exit 0); on lean nonzero / lean missing / zero modules / missing work exit nonzero (fail-closed, no lake fallback; no zero-work success banner). PLAN_ONLY remains dry-run plan(+optional check/olean); CLAIMED `build` without flag stays lake-delegated.
+  - Smokes: `native_olean_hash_smoke.sh` (STRICT via `SLAKE_NATIVE_OLEAN_HASH_SMOKE_STRICT=1`); `native_build_smoke.sh` (STRICT via `SLAKE_NATIVE_BUILD_SMOKE_STRICT=1`).
+  - Honesty: **FNV-1a 64 source content-hash sidecar subset** + **freestanding-adjacent sequential native olean build subset** — **not** freestanding build TCB / **not** Lake shake TCB / **not** CLAIMED. (Transitive plan-import deps-hash closed by A11.)
+- **A11 — plan-node transitive deps-hash invalidation on NATIVE_OLEAN (product-first; not CLAIMED):**
+  - **(1) Live gate:** before mtime/hash skip of module M, every **direct** plan-import dep (A5 edges) must be hash-fresh in the **start-of-run snapshot** (olean present + sidecar self-hash matches dep source); else rebuild M (`rebuild <mod> (dep-hash-stale)`). Multi-hop via cascade (this-run recompiled/soft-skip + dep-olean-newer), not full DAG fold into deps hex.
+  - **(2) Frozen deps line:** after successful `lean -o`, sidecar line 2 optional `deps <16-hex>` = FNV-1a 64 over sorted **direct** plan-import dep names + their source hashes at compile time. If present on skip decision, recompute and require match; mismatch → `rebuild <mod> (deps-line-stale)`. Pre-A11 line-1-only sidecars still parse (deps-line gate no-op; live gate still applies).
+  - **(3) Skip-heal:** on mtime-fresh / hash-fresh skip, best-effort rewrite self+deps sidecar from current sources (no lean) so a deleted/stale dep sidecar does not strand dependents in infinite `dep-hash-stale` rebuilds (reconverge next run after one fail-closed Host rebuild).
+  - Keep A8–A10 gates (FORCE, this-run cascade, dep-olean-newer, mtime-fresh OR self hash-fresh with olean present).
+  - Smoke: `native_olean_deps_hash_smoke.sh` on `systems_shaped` (full compile + deps lines → fresh skip both → content-edit Core+Host → Core sidecar delete / Host dep-hash-stale + Core heal → Run 4b skip both → pure deps-line-stale with Core false hash-fresh; STRICT via `SLAKE_NATIVE_OLEAN_DEPS_HASH_SMOKE_STRICT=1`).
+  - Honesty: **direct plan-import dep source-hash closure + cascade multi-hop** among A5 edges only (banner “plan-node transitive deps-hash” = that story) — **not** freestanding build TCB / **not** Lake shake TCB / **not** Lake package-transitive hash / **not** CLAIMED.
+- **A12 — parallel native olean ready-set waves (`SLAKE_NATIVE_OLEAN_JOBS=N`) (product-first; not CLAIMED):**
+  - Default / unset / `1` / invalid → **sequential** (A8–A11 smoke-compatible path; logs `native olean: jobs=1`).
+  - `N ≥ 2` → compile **ready** plan modules with up to N concurrent host `lean -o` (`IO.asTask` dedicated); ready = all **direct** plan-import deps (A5) finished this run (compiled, mtime/hash skipped, or soft-skipped). Host never starts before Core when Host imports Core.
+  - **Empty import-scan edges** ⇒ every unfinished module is immediately ready; `JOBS≥2` batches plan-order modules with concurrency N (no deeper ready-set gating). Prefer recorded import-scan edges for multi-module `JOBS≥2`.
+  - Skip/cascade/hash/deps-hash decisions stay single-threaded per ready module; only lean work parallelizes. Fail-closed: any lean fail drains the batch and fails the whole compile.
+  - Logs: `native olean: jobs=N`; parallel start banner when N≥2; OK banner says “parallel olean wave” only when a lean batch of size >1 actually ran (else ready-set / sequential honesty); per-module skip/lean lines may interleave under parallel.
+  - Preserves A9–A11: FORCE, cascade, dep-olean-newer, hash-fresh, deps-line, skip-heal, start-of-run hash-fresh snapshot, NATIVE_BUILD fail-closed (JOBS applies under NATIVE_BUILD).
+  - Fixture: `tests/slake/parallel_shaped` (independent A+B, Top imports both → wave1 A||B, wave2 Top).
+  - Smoke: `native_olean_parallel_smoke.sh` (STRICT via `SLAKE_NATIVE_OLEAN_PARALLEL_SMOKE_STRICT=1`) — JOBS unset/1 sequential; JOBS=2 parallel_shaped; systems_shaped JOBS=2 Core before Host; NATIVE_BUILD+JOBS skip lake; invalid JOBS→1; lean-fail under JOBS=2 fail-closed; honesty greps.
+  - Honesty: **parallel host-lean olean wave subset** — **not** freestanding build TCB / **not** Lake job server TCB / **not** CLAIMED / **not** shared-lib link.
+- **A13 — host shared-lib link subset after native oleans (`SLAKE_NATIVE_LINK=1`) (product-first; not CLAIMED):**
+  - Implies plan print + NATIVE_OLEAN compile path (same pattern as NATIVE_BUILD implying NATIVE_OLEAN).
+  - After olean step: generate package-local `.slake-native/slake_native_export.c` exporting `slake_native_plan_modules` (topo plan module names; skip package name node) and run host `cc -shared -fPIC -o .slake-native/libslake_native.so` (`CC` env or `cc` on PATH; `--version` probe).
+  - **Not** Lake lean_lib shared-object of compiled Lean IR — honesty banners name **host shared-lib link subset**.
+  - Soft vs fail-closed: missing `cc` → soft warn + skip link unless `SLAKE_NATIVE_LINK_STRICT=1` or combined with `SLAKE_NATIVE_BUILD=1` (then fail-closed so skip-lake requires link success). Actual link failure always fail-closed. Link always re-runs when requested (no mtime skip).
+  - Interactions: `PLAN_ONLY=1` + `NATIVE_LINK=1` → plan + olean + link + still no lake; `NATIVE_LINK=1` alone → plan + olean + link then lake; `NATIVE_BUILD=1` + `NATIVE_LINK=1` → plan + olean + link, skip lake only if both succeed. JOBS applies to olean wave only; link is sequential single host cc.
+  - `slake env` reports `SLAKE_NATIVE_LINK` and `SLAKE_NATIVE_LINK_STRICT`.
+  - Smoke: `native_link_smoke.sh` on `systems_shaped` (STRICT via `SLAKE_NATIVE_LINK_SMOKE_STRICT=1`) — PLAN_ONLY+link artifact; rebuild skip-fresh+link re-run; STRICT broken CC; NATIVE_BUILD+link skip lake; honesty greps.
+  - Honesty: **host shared-lib link subset** — **not** freestanding build TCB / **not** Lake shared-lib TCB / **not** Lake lean_lib shared-object / **not** CLAIMED.
+- **A14 — host package link graph subset after native oleans (`SLAKE_NATIVE_GRAPH=1`) (product-first; not CLAIMED):**
+  - Implies plan print + NATIVE_OLEAN compile path (same pattern as NATIVE_LINK / NATIVE_BUILD).
+  - After olean step (and after NATIVE_LINK when set): write package-local `.slake-native/slake_native_graph` — stable text: header honesty, `package <name>`, `module <Mod> olean .slake-native/<path>.olean` for plan modules with regular-file oleans, `edge <from> <to>` for A5 plan-import edges among those modules, optional `shared_lib .slake-native/libslake_native.so` when present, `summary modules=N edges=M`.
+  - Always re-writes when NATIVE_GRAPH set (no mtime skip). Graph write IO failure always fail-closed.
+  - Soft vs fail-closed: empty plan modules / no oleans → soft warn + skip unless `SLAKE_NATIVE_GRAPH_STRICT=1` or combined with `SLAKE_NATIVE_BUILD=1` (then fail-closed so skip-lake requires graph product).
+  - Interactions: `PLAN_ONLY=1` + `NATIVE_GRAPH=1` → plan + olean + graph + still no lake; `NATIVE_GRAPH=1` alone → plan + olean + graph then lake; `NATIVE_BUILD=1` + `NATIVE_GRAPH=1` → skip lake only if olean (+ link if NATIVE_LINK) **and** graph write succeed. Order: olean → NATIVE_LINK (if set) → NATIVE_GRAPH. JOBS applies to olean waves only.
+  - `slake env` reports `SLAKE_NATIVE_GRAPH` and `SLAKE_NATIVE_GRAPH_STRICT`.
+  - Smoke: `native_graph_smoke.sh` on `systems_shaped` (STRICT via `SLAKE_NATIVE_GRAPH_SMOKE_STRICT=1`) — PLAN_ONLY+graph artifact (Core/Host modules + edge Core Host); rebuild skip-fresh+graph re-write; NATIVE_BUILD+graph skip lake; NATIVE_BUILD+LINK+GRAPH shared_lib line; lake-delegate alone; env + honesty greps.
+  - Honesty: **host package link graph subset** — **not** freestanding build TCB / **not** Lake build graph TCB / **not** Lake lean_lib SO / **not** CLAIMED.
+- **A15 — host freestanding-adjacent product seal subset after native oleans (`SLAKE_NATIVE_SEAL=1`) (product-first; not CLAIMED):**
+  - Implies plan print + NATIVE_OLEAN compile path (same pattern as NATIVE_LINK / NATIVE_GRAPH / NATIVE_BUILD).
+  - After olean step (and after NATIVE_LINK / NATIVE_GRAPH when set): write package-local `.slake-native/slake_native_seal` — stable text: header honesty, `package <name>`, `module <Mod> olean_hash <16-hex>` (sidecar line-1 FNV-1a 64 or source FNV-1a 64), optional `graph_hash <16-hex>` (FNV of graph file bytes when present), optional `shared_lib .slake-native/libslake_native.so`, `seal <16-hex>` (FNV over package + sorted module lines + optional graph_hash + optional shared_lib), `summary modules=N`.
+  - Always re-writes when NATIVE_SEAL set (no mtime skip). Seal write IO failure always fail-closed.
+  - Soft vs fail-closed: empty plan modules / no oleans / cannot hash → soft warn + skip unless `SLAKE_NATIVE_SEAL_STRICT=1` or combined with `SLAKE_NATIVE_BUILD=1` (then fail-closed so skip-lake requires seal product).
+  - Interactions: `PLAN_ONLY=1` + `NATIVE_SEAL=1` → plan + olean + seal + still no lake; `NATIVE_SEAL=1` alone → plan + olean + seal then lake; `NATIVE_BUILD=1` + `NATIVE_SEAL=1` → skip lake only if olean (+ link if NATIVE_LINK) (+ graph if NATIVE_GRAPH) **and** seal write succeed. Order: olean → NATIVE_LINK (if set) → NATIVE_GRAPH (if set) → NATIVE_SEAL. JOBS applies to olean waves only.
+  - `slake env` reports `SLAKE_NATIVE_SEAL` and `SLAKE_NATIVE_SEAL_STRICT`.
+  - Smoke: `native_seal_smoke.sh` on `systems_shaped` (STRICT via `SLAKE_NATIVE_SEAL_SMOKE_STRICT=1`) — PLAN_ONLY+seal artifact (Core/Host olean_hash + seal hex); rebuild skip-fresh+seal re-write; NATIVE_BUILD+seal skip lake; NATIVE_BUILD+LINK+GRAPH+SEAL shared_lib+graph_hash lines; lake-delegate alone; STRICT/BUILD missing lean fail-closed; env + honesty greps.
+  - Honesty: **host freestanding-adjacent product seal subset** — **not** freestanding build TCB / **not** Lake lean_lib SO / **not** Lake build graph TCB / **not** CLAIMED.
+- **A16 — per-lib `roots` + optional per-lib `srcDir` (product-first; not CLAIMED):**
+  - Parse under each `[[lean_lib]]`: `name`, optional safe `srcDir` (empty/absolute/`..` → absent), optional `roots = ["…"]` (same quote-scan as `defaultTargets`; multi-line closed by A18).
+  - Store `PackageIdentity.leanLibs : List LeanLibIdentity`; keep `leanLibNames` / `leanLibCount` for env display.
+  - `planNodes`: prefer non-empty `defaultTargets`; else expand each lib’s `roots` (else lib `name`); package `name` first; still node cap 1…16.
+  - `srcDirForModule` / `resolveModulePathFor`: preferred srcDir = owning lib’s safe `srcDir` (module in `roots`, or lib name when roots empty), else package-level `srcDir`; then existing dotted + flat fallback confinement.
+  - Import-scan / NATIVE_* all resolve via identity so per-lib srcDir applies; LEAN_PATH / `-R` include safe package + per-lib dirs.
+  - Honesty banners: **per-lib roots/srcDir subset** when used — **not** full Lake faceting / globs / package imports / freestanding build TCB / CLAIMED.
+  - Fixture: `tests/slake/roots_shaped` (no defaultTargets, no package srcDir; `[[lean_lib]] name=Lib srcDir=lib roots=["Alpha","Beta"]`; Beta imports Alpha) → plan `roots_shaped Alpha Beta`.
+  - Smoke: `roots_plan_smoke.sh` (STRICT via `SLAKE_ROOTS_PLAN_SMOKE_STRICT=1`) — PLAN_ONLY golden plan; optional NATIVE_OLEAN under `lib/`; path-escape per-lib `srcDir=..`; systems_shaped regression; honesty greps.
+  - Existing packages (`basic_toml`, `systems_shaped`, `srcdir_shaped`) stay green via defaultTargets / package srcDir.
+- **A17 — CLAIMED `clean` wipes package-local `.slake-native/` (product-first hygiene; semantic growth within CLAIMED):**
+  - Native default clean: wipe `pkg/.lake/build` **and** `pkg/.slake-native` when present (empty rest only; bare `build/` still not removed).
+  - Symlink fence on `.slake-native` (same best-effort `lstat` pattern as `.lake` / `.lake/build`; refuse + nonzero; TOCTOU residual honesty).
+  - Missing `.slake-native` → OK (no error). FS_PROC/PIPE path: after `lake clean` (any normal exit), still native-wipe `.slake-native` so freestanding-adjacent products do not leak after dual residual clean.
+  - **Honesty:** **native product out dir wipe subset** (`.slake-native` + `.lake/build`) — **not** full Lake clean set / **not** freestanding build TCB expansion beyond hygiene / **not** a new CLAIMED token (stays `(build clean env test)`).
+  - Parity: `run_parity.sh` marker band asserts `.slake-native` gone after clean. Smoke: `native_clean_smoke.sh` (STRICT via `SLAKE_NATIVE_CLEAN_SMOKE_STRICT=1`) — marker wipe + symlink fence + PLAN_ONLY+NATIVE_OLEAN then clean.
+  - Residual closed by **A33:** path-require package `.slake-native/` products no longer leak after root clean.
+- **A18 — multi-line `roots` / `defaultTargets` arrays (product-first; not CLAIMED):**
+  - Host `Slake.Config.takeBracketArray`: package `defaultTargets = [ … ]` and per-`[[lean_lib]]` `roots = [ … ]` accept **multi-line** double-quoted string arrays (join body until a line ends with `]`; same fail-closed quote-scan as single-line).
+  - Single-line arrays unchanged (existing fixtures stay green). First `roots` assignment still wins; unsafe root labels still filtered via `isSafeModName`.
+  - Fail-closed: unclosed array → empty list (lib-name / empty-targets fallback); unclosed final quote dropped; not full TOML multi-line tables / nested arrays.
+  - Fixture: `tests/slake/multiline_roots_shaped` (multi-line `roots = ["Alpha","Beta"]` under `srcDir=lib`; Beta imports Alpha) → plan `multiline_roots_shaped Alpha Beta`.
+  - Smoke: `multiline_roots_plan_smoke.sh` (STRICT via `SLAKE_MULTILINE_ROOTS_PLAN_SMOKE_STRICT=1`) — PLAN_ONLY golden plan; multi-line defaultTargets band; unclosed roots soft-empty; path-escape roots filtered; single-line roots_shaped regression.
+  - Honesty: **multi-line quoted string array subset** for roots/defaultTargets only — **not** full TOML / **not** Lake faceting / globs / package imports / freestanding build TCB / CLAIMED.
+- **A19 — host lean C-output emit subset after native oleans (`SLAKE_NATIVE_C=1`) (product-first; not CLAIMED):**
+  - Implies plan print + NATIVE_OLEAN compile path (same pattern as NATIVE_LINK / NATIVE_SEAL / NATIVE_BUILD).
+  - After olean step (before NATIVE_LINK / NATIVE_GRAPH / NATIVE_SEAL when set): for each topo plan module (skip package name), resolve source via `resolveModulePathFor`, spawn host `lean -c <pkg>/.slake-native/<ModRel>.c <file>` with same LEAN_PATH as olean (`.slake-native` first, then pkg [+ srcDir]); nested modules → `Foo/Bar.c`.
+  - Always re-emits when requested (no mtime skip). Nonzero lean exit always fail-closed and names the failing module.
+  - Soft vs fail-closed: missing lean / missing source / zero C files → soft warn + skip unless `SLAKE_NATIVE_C_STRICT=1` or combined with `SLAKE_NATIVE_BUILD=1` (then fail-closed so skip-lake requires C emit product).
+  - Interactions: `PLAN_ONLY=1` + `NATIVE_C=1` → plan + olean + C emit + still no lake; `NATIVE_C=1` alone → plan + olean + C emit then lake; `NATIVE_BUILD=1` + `NATIVE_C=1` → skip lake only if olean **and** C emit succeed. Order: olean → C emit → link → graph → seal. JOBS applies to olean waves only.
+  - `slake env` reports `SLAKE_NATIVE_C` and `SLAKE_NATIVE_C_STRICT`. Help + cmdEnv honesty: **host lean C-output emit subset** — not freestanding build TCB / not Lake lean_lib SO of compiled Lean IR / not full object compile+link of Lean runtime / not CLAIMED.
+  - Smoke: `native_c_smoke.sh` on `systems_shaped` (STRICT via `SLAKE_NATIVE_C_SMOKE_STRICT=1`) — PLAN_ONLY+C Core.c/Host.c; NATIVE_BUILD+C skip lake; env; STRICT/BUILD missing lean fail-closed; clean wipes `.slake-native` (A17); honesty greps.
+  - Honesty: **host lean C-output emit subset** — **not** freestanding build TCB / **not** Lake lean_lib shared-object of compiled Lean IR / **not** full object compile+link of Lean runtime / **not** CLAIMED.
+- **A20 — host object compile of lean C after native C emit (`SLAKE_NATIVE_OBJ=1`) (product-first; not CLAIMED):**
+  - Implies plan print + NATIVE_OLEAN + **NATIVE_C** (object compile needs `.c` files; auto-runs C emit when OBJ set).
+  - After C emit (before NATIVE_LINK / NATIVE_GRAPH / NATIVE_SEAL when set): for each topo plan module (skip package name), require existing non-empty `.slake-native/<ModRel>.c`, spawn host `cc -c -fPIC -I<leanInclude> -o .slake-native/<ModRel>.o .slake-native/<ModRel>.c` with `cwd=pkg`; nested modules → `Foo/Bar.o`.
+  - Include resolution (fail-closed / soft): `LEAN_INCLUDE` direct `-I` → `LEAN_SYSROOT`/`LEAN_PREFIX`+`/include` → `lean --print-prefix`+`/include`.
+  - Always re-compiles when requested (no mtime skip). Nonzero `cc` exit always fail-closed and names the failing module. Empty/missing `.o` after cc → fail-closed.
+  - Soft vs fail-closed: missing cc / include / C input / zero `.o` → soft warn + skip unless `SLAKE_NATIVE_OBJ_STRICT=1` or combined with `SLAKE_NATIVE_BUILD=1` (then fail-closed so skip-lake requires object compile product).
+  - Interactions: `PLAN_ONLY=1` + `NATIVE_OBJ=1` → plan + olean + C + obj + still no lake; `NATIVE_OBJ=1` alone → plan + olean + C + obj then lake; `NATIVE_BUILD=1` + `NATIVE_OBJ=1` → skip lake only if olean **and** C emit **and** object compile succeed. Order: olean → C emit → **obj** → link → graph → seal. JOBS applies to olean waves only. A13 NATIVE_LINK remains name-table SO (not IR link of these `.o` files).
+  - `slake env` reports `SLAKE_NATIVE_OBJ` and `SLAKE_NATIVE_OBJ_STRICT`. Help + cmdEnv honesty: **host object compile of lean C subset** — not freestanding build TCB / not Lake lean_lib SO of compiled Lean IR / not linking Lean runtime into SO / not CLAIMED.
+  - Smoke: `native_obj_smoke.sh` on `systems_shaped` (STRICT via `SLAKE_NATIVE_OBJ_SMOKE_STRICT=1`) — PLAN_ONLY+OBJ Core.o/Host.o; NATIVE_BUILD+OBJ skip lake; env; STRICT/BUILD missing cc fail-closed; nested Foo/Bar.o; clean wipes `.slake-native` (A17); honesty greps.
+  - Honesty: **host object compile of lean C subset** — **not** freestanding build TCB / **not** Lake lean_lib shared-object of compiled Lean IR / **not** linking Lean runtime into SO / **not** CLAIMED.
+- **A21 — host leanc IR shared-lib link of plan-module objects + Lean runtime (`SLAKE_NATIVE_IRLINK=1`) (product-first; not CLAIMED):**
+  - Implies plan print + NATIVE_OLEAN + **NATIVE_C** + **NATIVE_OBJ** (IR link needs non-empty plan-module `.o` files; auto-runs C emit + object compile when IRLINK set).
+  - After object compile (before A13 NATIVE_LINK / NATIVE_GRAPH / NATIVE_SEAL when set): collect non-empty regular `.slake-native/<ModRel>.o` for topo plan modules (skip package name; path confinement via safe module names) and spawn host `leanc -shared -o .slake-native/libslake_ir.so <objRel…>` with `cwd=pkg` (`LEANC` env or `leanc` on PATH; optional same-dir as `LEAN`).
+  - **Not** freestanding build TCB / **not** Lake lean_lib shared-object TCB / **not** CLAIMED / **not** full Lake shared facet. A13 NATIVE_LINK remains separate name-table SO (`libslake_native.so`); both SOs can coexist.
+  - Soft vs fail-closed: missing leanc / missing `.o` / zero objs → soft warn + skip unless `SLAKE_NATIVE_IRLINK_STRICT=1` or combined with `SLAKE_NATIVE_BUILD=1` (then fail-closed so skip-lake requires IR link success). Nonzero leanc exit always fail-closed. Empty/missing SO after claimed success always fail-closed. Always re-links when requested (no mtime skip).
+  - Interactions: `PLAN_ONLY=1` + `NATIVE_IRLINK=1` → plan + olean + C + obj + IR link + still no lake; `NATIVE_IRLINK=1` alone → plan + olean + C + obj + IR link then lake; `NATIVE_BUILD=1` + `NATIVE_IRLINK=1` → skip lake only if olean **and** C emit **and** object compile **and** IR link succeed. Order: olean → C emit → obj → **IR link** → name-table link → graph → seal.
+  - Graph/seal light touch: optional `shared_lib_ir .slake-native/libslake_ir.so` when file exists (does not replace A13 `shared_lib` field).
+  - `slake env` reports `SLAKE_NATIVE_IRLINK` and `SLAKE_NATIVE_IRLINK_STRICT`. Help + cmdEnv honesty: **host leanc IR shared-lib link subset of plan-module objects + Lean runtime via leanc**.
+  - Smoke: `native_irlink_smoke.sh` on `systems_shaped` (STRICT via `SLAKE_NATIVE_IRLINK_SMOKE_STRICT=1`) — PLAN_ONLY+IRLINK libslake_ir.so; NATIVE_BUILD+IRLINK skip lake; env; STRICT/BUILD missing LEANC fail-closed; coexistence with NATIVE_LINK; clean wipes `.slake-native` (A17); honesty greps.
+  - Honesty: **host leanc IR shared-lib link subset of plan-module objects + Lean runtime via leanc** — **not** freestanding build TCB / **not** Lake lean_lib shared-object TCB / **not** CLAIMED / **not** full Lake shared facet; A13 remains name-table SO.
+- **A22 — host static archive of plan-module objects (`SLAKE_NATIVE_AR=1`) (product-first; not CLAIMED):**
+  - Implies plan print + NATIVE_OLEAN + **NATIVE_C** + **NATIVE_OBJ** (needs non-empty plan-module `.o`; auto-runs C emit + object compile when AR set). Does **not** imply NATIVE_IRLINK (static archive and shared IR link are independent; both can run).
+  - After object compile (and after IRLINK when both set; before A13 NATIVE_LINK / NATIVE_GRAPH / NATIVE_SEAL when set): collect non-empty regular `.slake-native/<ModRel>.o` for topo plan modules (skip package name; path confinement via safe module names) and spawn host `ar rcs .slake-native/libslake_ir.a <objRel…>` with `cwd=pkg` (`AR` env or `ar` on PATH; probe `--version` or `-V`).
+  - **Not** freestanding build TCB / **not** Lake lean_lib static/shared facet / **not** CLAIMED / **not** linking Lean runtime into the archive (plain `ar` of module `.o` only; A21 leanc still the path that pulls runtime into SO). Coexists with `libslake_ir.so` and `libslake_native.so`.
+  - Soft vs fail-closed: missing ar / missing `.o` / zero objs → soft warn + skip unless `SLAKE_NATIVE_AR_STRICT=1` or combined with `SLAKE_NATIVE_BUILD=1` (then fail-closed so skip-lake requires archive success). Nonzero ar exit always fail-closed. Empty/missing `.a` after claimed success always fail-closed. Always re-archives when requested (no mtime skip; removes stale archive first).
+  - Interactions: `PLAN_ONLY=1` + `NATIVE_AR=1` → plan + olean + C + obj + ar + still no lake; `NATIVE_AR=1` alone → plan + olean + C + obj + ar then lake; `NATIVE_BUILD=1` + `NATIVE_AR=1` → skip lake only if olean **and** C emit **and** object compile **and** static archive succeed (+ IRLINK if set). Order: olean → C emit → obj → **IR link (if set)** → **AR (if set)** → name-table link → graph → seal.
+  - Graph/seal light touch: optional `static_lib .slake-native/libslake_ir.a` when file exists (does not replace `shared_lib` or `shared_lib_ir`).
+  - `slake env` reports `SLAKE_NATIVE_AR` and `SLAKE_NATIVE_AR_STRICT`. Help + cmdEnv honesty: **host static archive of plan-module objects subset via ar rcs**.
+  - Smoke: `native_ar_smoke.sh` on `systems_shaped` (STRICT via `SLAKE_NATIVE_AR_SMOKE_STRICT=1`) — PLAN_ONLY+AR libslake_ir.a; NATIVE_BUILD+AR skip lake; env; STRICT/BUILD missing AR fail-closed; coexistence with IRLINK/LINK; clean wipes `.slake-native` (A17); honesty greps.
+  - Honesty: **host static archive of plan-module objects subset via ar rcs** — **not** freestanding build TCB / **not** Lake lean_lib static/shared facet / **not** CLAIMED / **not** linking Lean runtime into the archive; A13 remains name-table SO; A21 remains leanc IR SO.
+- **A23 — host leanc executable link of plan-module objects + stub main + Lean runtime (`SLAKE_NATIVE_EXE=1`) (product-first; not CLAIMED):**
+  - Implies plan print + NATIVE_OLEAN + **NATIVE_C** + **NATIVE_OBJ** (needs non-empty plan-module `.o`; auto-runs C emit + object compile when EXE set). Does **not** imply NATIVE_IRLINK or NATIVE_AR (independent; all can coexist).
+  - After object compile (and after IRLINK / AR when set; before A13 NATIVE_LINK): write package-local `.slake-native/slake_native_main.c` (generated stub `main` returns 0 — not Lake lean_exe root / not freestanding app TCB) and spawn host `leanc -o .slake-native/slake_ir .slake-native/slake_native_main.c <objRel…>` with `cwd=pkg` (`LEANC` env or `leanc` on PATH; same `resolveLeancCmd` as A21).
+  - **Not** freestanding build TCB / **not** Lake lean_exe / **not** Lake lean_lib shared facet / **not** CLAIMED / **not** a real application entry from lakefile. Coexists with `libslake_ir.so`, `libslake_ir.a`, `libslake_native.so`.
+  - Soft vs fail-closed: missing leanc / missing `.o` / zero objs → soft warn + skip unless `SLAKE_NATIVE_EXE_STRICT=1` or combined with `SLAKE_NATIVE_BUILD=1` (then fail-closed so skip-lake requires executable link success). Nonzero leanc exit always fail-closed. Empty/missing binary after claimed success always fail-closed. Always re-links when requested (no mtime skip; removes stale binary first).
+  - Interactions: `PLAN_ONLY=1` + `NATIVE_EXE=1` → plan + olean + C + obj + exe + still no lake; `NATIVE_EXE=1` alone → plan + olean + C + obj + exe then lake; `NATIVE_BUILD=1` + `NATIVE_EXE=1` → skip lake only if olean **and** C emit **and** object compile **and** executable link succeed (+ IRLINK if set) (+ AR if set). Order: olean → C emit → obj → **IR link (if set)** → **AR (if set)** → **EXE (if set)** → name-table link → graph → seal.
+  - Graph/seal light touch: optional `executable .slake-native/slake_ir` when regular non-empty file exists (does not replace `shared_lib` / `shared_lib_ir` / `static_lib`).
+  - `slake env` reports `SLAKE_NATIVE_EXE` and `SLAKE_NATIVE_EXE_STRICT`. Help + cmdEnv honesty: **host leanc executable link subset of plan-module objects + stub main + Lean runtime via leanc**.
+  - Smoke: `native_exe_smoke.sh` on `systems_shaped` (STRICT via `SLAKE_NATIVE_EXE_SMOKE_STRICT=1`) — PLAN_ONLY+EXE slake_ir; NATIVE_BUILD+EXE skip lake; env; STRICT/BUILD missing LEANC fail-closed; coexistence with IRLINK/AR/LINK; graph/seal executable line; clean wipes `.slake-native` (A17); honesty greps.
+  - Honesty: **host leanc executable link subset of plan-module objects + stub main + Lean runtime via leanc** — **not** freestanding build TCB / **not** Lake lean_exe / **not** CLAIMED / **not** a real application entry from lakefile; A13 remains name-table SO; A21 remains leanc IR SO; A22 remains static archive.
+- **A24 — per-lib `globs` subset for plan expansion (product-first; not CLAIMED):**
+  - Parse under each `[[lean_lib]]`: `globs = ["…"]` (single- or multi-line via `takeBracketArray` like roots A18). First assignment wins; unclosed → empty. Store on `LeanLibIdentity.globs`.
+  - Filter: ones must pass `isSafeModName`; pattern bases before trailing `.+` / `.*` must be safe mod names (empty base / `..` / path seps rejected).
+  - `planTargetsFromLeanLibs` / `planNodes`: if `roots` non-empty → roots win; else if `globs` non-empty → expand (pure: ones + `M.*` base only); else lib name. CLI uses `planNodesIO` for full expand (A25 recursive). A24 shipped ones + immediate walk; multi-level closed by A25.
+  - `leanLibOwnsModule`: when roots empty and globs set, pure prefix match (`M` / `M.*` / `M.+`) so per-lib `srcDir` resolves multi-level children under globs-shaped packages.
+  - Honesty: `usesPerLibGlobs` / `hasPerLibGlobs` / `per-lib-globs` identity marker / plan banners **per-lib globs subset** (A25: **recursive multi-level**) — **not** full Lake Glob / faceting / package imports / freestanding build TCB / CLAIMED.
+  - Fixture + smoke shared with A25 (`globs_shaped` / `globs_plan_smoke.sh`).
+- **A25 — recursive multi-level per-lib glob expansion (product-first; not CLAIMED):**
+  - Deepens A24: `.+` / `.*` expand via `listSubmodulesRecursive` (Lake-style nested dir walk under confining `pkg[/srcDir]/base/`). Regular `*.lean` + nested **real** dirs that hold further `.lean` modules (e.g. `Core/Nested/Deep.lean` → `Core.Nested.Deep`). Keep `listImmediateSubmodules` as unused-by-plan immediate-only helper.
+  - Bounds: `maxGlobWalkDirDepth = 16` dir levels below base; `maxGlobWalkModSegments = 16` name segments (fail-closed; plan node cap still 1…16). Soft-empty missing/unreadable dirs. Path confinement: refuse `..` / absolute / unsafe stems; **refuse dir/file symlinks** via `symlinkMetadata` lstat fence (best-effort TOCTOU residual, A17 class — never follow links outside confining tree).
+  - Stable order: sorted ascending by full module name for children; first-wins dedup across globs; roots still win when non-empty; `classifyGlob` / ones / pure expand / `planNodesIO` wiring unchanged.
+  - Honesty banners: **per-lib globs recursive multi-level subset** — **not** full Lake Glob.matches / package imports / freestanding build TCB / CLAIMED.
+  - Fixture: `tests/slake/globs_shaped` extended — `lib/Core.lean` + `lib/Core/Extra.lean` + `lib/Core/Nested/Deep.lean` (Deep imports Extra; Extra imports Core) → plan `globs_shaped Core Core.Extra Core.Nested.Deep`.
+  - Smoke: `globs_plan_smoke.sh` (STRICT via `SLAKE_GLOBS_PLAN_SMOKE_STRICT=1`) — PLAN_ONLY multi-level golden; `M.+` excludes self + includes nested; multi-line ones; path-escape; roots win; **dir-symlink refuse** (escape outside not planned); **depth-bound** over-cap leaf absent; optional NATIVE_OLEAN for nested modules; roots_shaped / systems_shaped regression; honesty greps (recursive subset, not full Lake).
+- **A26 — path `[[require]]` subset for LEAN_PATH + path-dep olean precompile (product-first; not CLAIMED):**
+  - Host TOML scan of `[[require]]` tables: optional `name` + optional safe relative `path` (same confinement as `srcDir`: no absolute / `..`; cap 16 requires). Git/url-only requires count in `require=N` but not `path-require=M`.
+  - Identity banner: `require=N path-require=M` when headers present.
+  - NATIVE_CHECK / NATIVE_OLEAN / NATIVE_BUILD LEAN_PATH appends path-dep roots (depth-bounded ≤4): nested path-require roots, dep `.slake-native`, dep safe srcDirs, dep package root.
+  - Path-dep olean precompile: single walker `runPathRequireNativeOleens` (OLEAN/BUILD + CHECK); each hop compiles dep with depth−1 into `dep/.slake-native/`. Real-dir fence (lstat refuse symlink/file). Missing/not-a-dir fail-closed under STRICT / NATIVE_BUILD.
+  - Path-dep oleans under `dep/.slake-native/` (root plan expansion deferred to A30 import-driven fold).
+  - Residual closed by **A27:** path-dep modules used to leave root oleans stale on path-dep API change.
+  - Cap 16 stored requires; extra headers → `require-cap=16` banner; fail-closed under STRICT/NATIVE_BUILD.
+  - Fixture: `tests/slake/require_path_shaped` (`App` imports path-dep `Dep`).
+  - Smoke: `require_path_smoke.sh` (STRICT via `SLAKE_REQUIRE_PATH_SMOKE_STRICT=1`) — identity; PLAN_ONLY root plan; NATIVE_OLEAN; NATIVE_CHECK-only precompile; NATIVE_BUILD; nested depth-2; absolute/`..` path-require=0; missing/not-a-dir (OLEAN_STRICT + BUILD); symlink/file refuse; require-cap; help greps.
+  - Honesty: **path [[require]] subset** — **not** git/url / **not** Lake resolve-deps / **not** package-transitive root plan / **not** freestanding build TCB / **not** CLAIMED (A27 adds path-dep → root cascade).
+- **A27 — path-dep → root olean cascade invalidation (product-first; not CLAIMED):**
+  - After A26 path-require precompile, collect path-dep plan modules + olean paths (`collectPathDepModules`, same depth bound as LEAN_PATH/precompile).
+  - On consumer plan-module skip decision: scan source imports; for import targets that are **not** root plan nodes but match a path-dep plan module name, if that path-dep olean is a regular file **newer than** the consumer olean → force rebuild (`path-dep-olean-newer` banner).
+  - Closes A26 residual without expanding root plan nodes (root plan stays root-only). Content-edit Dep → Dep rebuild (A10) + App cascade; Dep.olean-only rewrite → App cascade; bare touch Dep (hash-fresh) → App stays skip.
+  - Fixture reuse: `tests/slake/require_path_shaped`.
+  - Smoke: `require_path_cascade_smoke.sh` (STRICT via `SLAKE_REQUIRE_PATH_CASCADE_SMOKE_STRICT=1`) — full compile; fresh skip; Dep content-edit cascade; Dep.olean-only rewrite cascade; touch-without-edit no cascade; help/env honesty greps.
+  - Honesty: **path-dep → root olean cascade subset** (`path-dep-olean-newer` on external imports) — **not** package-transitive plan into root / **not** git/url / **not** Lake resolve-deps / **not** Lake shake TCB / **not** freestanding build TCB / **not** CLAIMED / **not** path-dep soft-skip this-run name cascade (olean-newer after precompile covers rebuilds). Residual closed by **A28** path-dep source-hash fold into A11 deps-line.
+- **A28 — path-dep source-hash fold into A11 deps-line (product-first; not CLAIMED):**
+  - Extend A11 frozen `deps <hex>`: fold **path-dep import** module names + source FNV-1a 64 hashes (from A27 `PathDepModuleInfo` inventory + consumer import-scan) into the same canonical deps-line as direct plan-import deps (sorted by name; plan-local + path-dep combined).
+  - Closes A27 residual: hash-fresh path-dep with non-newer olean (A11 Run 5 shape across package boundary) → consumer `deps-line-stale` rebuild; bare touch path-dep still skip; root plan stays root-only.
+  - `collectPathDepModules` carries resolved path-dep source paths; write/refresh/stale gates thread path-dep inventory into `planImportDepsHashHex`.
+  - Fixture reuse: `tests/slake/require_path_shaped`.
+  - Smoke: `require_path_deps_hash_smoke.sh` (STRICT via `SLAKE_REQUIRE_PATH_DEPS_HASH_SMOKE_STRICT=1`) — full compile + App deps line; fresh skip; pure path-dep deps-line-stale (Dep hash-fresh, App rebuild, deps hex changes); touch-without-edit no cascade; help/env honesty greps.
+  - Honesty: **path-dep source-hash fold into A11 deps-line subset** — **not** package-transitive plan into root / **not** git/url / **not** Lake resolve-deps / **not** Lake package-transitive hash / **not** freestanding build TCB / **not** CLAIMED.
+- **A29 — sibling confining `path = "../dep"` require (product-first; not CLAIMED):**
+  - Extends A26 `isSafeRequirePath` / `resolveRequirePath`: accept monorepo sibling form **exactly one leading `..` + ≥1 safe components** (`../dep`, `../packages/foo`); resolve as `pkg.parent / rest` under **package-parent confining root**.
+  - Refuse multi-`..` escape (`../../x`), bare `..`, mid-path `..` (`foo/../bar`), absolute — `path-require=0` at parse. Real-dir lstat fence (A26) still refuses symlink/file/missing under STRICT/NATIVE_BUILD.
+  - Reuses A26 LEAN_PATH feed + path-dep olean precompile walker + A27 cascade + A28 deps-hash fold. Root plan stays root-only.
+  - Chain-plan banner now includes path-require honesty note (path-dep imports never create root plan edges).
+  - Fixture: `tests/slake/require_sibling_shaped` (`app` → `path = "../dep"`; sibling `dep`).
+  - Smoke: `require_sibling_smoke.sh` (STRICT via `SLAKE_REQUIRE_SIBLING_SMOKE_STRICT=1`) — identity path-require=1; PLAN_ONLY root plan; NATIVE_OLEAN + A29 honesty; NATIVE_BUILD skip-lake; nested `../packages/foo`; multi-`..` / bare `..` / mid-path `..` / absolute path-require=0; symlink sibling refuse under OLEAN_STRICT; help greps.
+  - Honesty: **sibling confining `../path` subset** (package-parent confining; one leading `..` only) — **not** multi-`..` escape / **not** workspace multi-level walk-up / **not** git/url / **not** Lake resolve-deps / **not** freestanding build TCB / **not** CLAIMED (A30 folds imported path-dep modules into root plan).
+- **A30 — package-transitive plan subset (import-driven; product-first; not CLAIMED):**
+  - When a **root plan module** imports a path-dep plan module name (from A26/A29 path-require inventory), fold that module into the root plan node list (first-seen import order; cap 1…16). When import-driven append would exceed the cap, emit truncate banner and **fail-closed** under `SLAKE_NATIVE_OLEAN_STRICT` / `SLAKE_NATIVE_BUILD` (A26 require-cap style; soft path keeps truncated plan with warn). Kahn import-scan then orders `Dep` before `App`.
+  - Path-dep oleans still compiled by A26 into `dep/.slake-native/`; root olean wave **skips only A30-folded** path-dep plan nodes (not root modules that share a flat label with path-dep inventory; `pathDepPlanNodes` = plan ∩ inventory \ root) — log `skip Dep (path-dep plan node; olean under path-require package)`, pre-seed finished, and count them as **path-dep plan node(s)** on the OK banner (not “skipped fresh”).
+  - Import-scan resolve is package-local-first when the source **exists**, else path-dep `extraSrc` map; A9 plan-edge olean-newer also probes path-dep package oleans for plan-import deps (A27 still covers path-dep-only imports). **A32** product-guarantees path-dep plan-module nodes in NATIVE_GRAPH + NATIVE_SEAL (package-cwd-relative paths, including A29 sibling `../dep/…`).
+  - Not every dep plan module unconditionally — only those imported by root plan work modules.
+  - Fixture reuse: `tests/slake/require_path_shaped` (+ sibling band).
+  - Smoke: `require_transitive_plan_smoke.sh` (STRICT via `SLAKE_REQUIRE_TRANSITIVE_PLAN_SMOKE_STRICT=1`) — PLAN_ONLY Dep before App; identity path-require=1; honesty greps; NATIVE_OLEAN skip + oleans; NATIVE_BUILD; sibling expand; systems_shaped regression.
+  - Honesty: **package-transitive plan subset** (import-driven) — **not** Lake resolve-deps / **not** git/url / **not** every dep plan module / **not** freestanding build TCB / **not** CLAIMED / **not** full Lake package-transitive hash.
+- **A31 — freestanding-adjacent path-dep plan-module C/OBJ into IR products (product-first; not CLAIMED):**
+  - When `SLAKE_NATIVE_C` / `NATIVE_OBJ` / `NATIVE_IRLINK` / `NATIVE_AR` / `NATIVE_EXE` is set (same imply chain), after path-require olean precompile + root olean wave: for each **A30-folded** path-dep plan module only, emit host `lean -c` → `dep/.slake-native/<ModRel>.c` (cwd=path-dep package; LEAN_PATH as path-dep olean) and host `cc -c -fPIC` → `dep/.slake-native/<ModRel>.o` (same include resolve as A20).
+  - Root module C/OBJ still under root `.slake-native/`. Order: olean → path-dep C → root C → path-dep OBJ → root OBJ → IRLINK/AR/EXE with combined objs in expanded-plan topo order (path-dep before root when Dep≺App).
+  - A21/A22/A23 collect non-empty `.o` from path-dep outDir + root outDir; A13 name-table SO stays root-filtered (no new A13 semantics). Soft vs fail-closed mirrors A19–A23.
+  - Fixture reuse: `tests/slake/require_path_shaped` (App imports Dep).
+  - Smoke: `native_pathdep_ir_smoke.sh` (STRICT via `SLAKE_NATIVE_PATHDEP_IR_SMOKE_STRICT=1`) — PLAN_ONLY+IRLINK Dep.o under dep + libslake_ir.so; AR/EXE coexistence; systems_shaped no path-dep IR claims; help/env honesty.
+  - Honesty: **freestanding-adjacent path-dep plan-module C/OBJ into IR products subset** (A30-folded only) — **not** Lake lean_lib shared/static/exe facet / **not** freestanding build TCB / **not** CLAIMED / **not** every dep plan module / **not** git/url / **not** multi-`..`.
+- **A32 — freestanding-adjacent path-dep plan-module nodes in NATIVE_GRAPH + NATIVE_SEAL (product-first; not CLAIMED):**
+  - When A30-folded path-dep plan modules exist and their path-dep oleans are regular files, **NATIVE_GRAPH** lists them as module lines using **package-cwd-relative** olean paths (`dep/.slake-native/Dep.olean`; A29 sibling `../dep/.slake-native/Dep.olean`) in expanded-plan topo order (path-dep before root when Dep≺App); A5 import edges among present modules.
+  - **NATIVE_SEAL** includes the same A30-folded path-dep modules in `module <Mod> olean_hash <16-hex>` (hash from path-dep package sidecar next to olean, or recompute from path-dep source FNV-1a 64 like root modules).
+  - Reuses `pathDepPlanNodes` / `PathDepModuleInfo` / A30 fold inventory — **no** new plan fold semantics / **no** git/url / **no** multi-`..` / **no** Lake resolve-deps / **not** every dep plan module.
+  - Soft vs fail-closed mirrors A14/A15: missing path-dep olean for a folded module may omit that module line with warn; STRICT/NATIVE_BUILD fail-closed when graph/seal has zero oleans (same empty-product style as root modules). Graph write uses `pathRelToPkg` (not absolute host paths).
+  - systems_shaped / packages without path-require: **no** new path-dep graph/seal claims (regression).
+  - Smoke: `native_pathdep_graph_seal_smoke.sh` (STRICT via `SLAKE_NATIVE_PATHDEP_GRAPH_SEAL_SMOKE_STRICT=1`) — PLAN_ONLY+GRAPH/SEAL (+IRLINK optional shared_lib_ir); NATIVE_BUILD skip-lake; systems_shaped regression; help/env honesty.
+  - Honesty: **freestanding-adjacent path-dep plan-module nodes in NATIVE_GRAPH + NATIVE_SEAL subset** (A30-folded only) — **not** freestanding build TCB / **not** Lake build graph TCB / **not** Lake resolve-deps / **not** CLAIMED / **not** every dep plan module / **not** git/url / **not** multi-`..`.
+- **A33 — freestanding-adjacent path-require package `.slake-native` wipe on CLAIMED `clean` (product-first hygiene; semantic growth within CLAIMED):**
+  - After A17 root wipe (`pkg/.lake/build` + `pkg/.slake-native`), also wipe each **path-require** package’s `.slake-native/` when identity has A26/A29 path requires (`pathRequires` order stable).
+  - Resolve via `resolveRequirePath` (under-pkg or sibling `../…` under package-parent; refuse absolute / multi-`..` / mid-path `..` / bare `..`); real-dir lstat fence on dep package (soft-skip missing/symlink/file); reuse A17 `tryRemoveSlakeNativeDir` (symlink `.slake-native` → refuse + nonzero).
+  - Soft missing dep `.slake-native` OK. FS_PROC/PIPE: after `lake clean` + root `.slake-native` wipe, apply the same path-require wipe set.
+  - **Not** git/url require wipe / **not** Lake resolve-deps clean of every workspace package / **not** multi-`..` walk-up / **not** wiping dep `.lake/build` / **not** CLAIMED token expansion.
+  - Smoke: `native_pathdep_clean_smoke.sh` (STRICT via `SLAKE_NATIVE_PATHDEP_CLEAN_SMOKE_STRICT=1`) — under-pkg both gone; sibling `../dep/.slake-native` wiped; systems_shaped root-only (no false A33 wipe); help/env honesty; dep symlink fence; FS_PROC/PIPE dual residual both gone (STRICT unlinked fail); native under-pkg/sibling dep `.lake/build` marker survives (not dep `.lake/build` wipe).
+  - Honesty: **path-require package `.slake-native` wipe subset** — **not** freestanding build TCB / **not** full Lake clean / **not** Lake resolve-deps / **not** CLAIMED expansion (stays `(build clean env test)`).
+- **A34 — freestanding-adjacent plan-module object inventory in NATIVE_GRAPH + NATIVE_SEAL (product-first; not CLAIMED):**
+  - When plan-module `.o` files exist (root under `.slake-native/<ModRel>.o` from A20, or A30-folded path-dep under package-cwd-relative `dep/.slake-native/…` / A29 sibling `../dep/.slake-native/…` from A31), **NATIVE_GRAPH** lists distinct `object <Mod> <relpath>` lines (soft-omit missing `.o`; olean module lines stay A14/A32-stable).
+  - **NATIVE_SEAL** lists `module <Mod> obj_hash <16-hex>` (FNV-1a 64 of object file bytes via the same `fnv1a64Bytes` helper; soft-omit missing/unreadable; do **not** fail seal solely for zero objects).
+  - A34 headers/banners only when ≥1 object/obj_hash line is actually written (pdN/objN > 0 style like A32).
+  - systems_shaped without NATIVE_OBJ: no object/obj_hash lines (A14/A15 regression). systems_shaped with NATIVE_OBJ: root Core/Host object lines + obj_hash.
+  - Smoke: `native_obj_graph_seal_smoke.sh` (STRICT via `SLAKE_NATIVE_OBJ_GRAPH_SEAL_SMOKE_STRICT=1`) — systems_shaped OBJ+GRAPH+SEAL; require_path_shaped path-dep Dep.o; sibling `../dep/.slake-native/Dep.o`; olean-only negative; help/env honesty.
+  - Honesty: **freestanding-adjacent plan-module object inventory in NATIVE_GRAPH + NATIVE_SEAL subset** — **not** freestanding build TCB / **not** Lake lean_lib facet / **not** CLAIMED / **not** every dep plan module / **not** name-table SO (A13) / **not** changing IR link semantics / **not** git/url / **not** multi-`..`.
+- **A35 — freestanding-adjacent plan-module C source inventory in NATIVE_GRAPH + NATIVE_SEAL (product-first; not CLAIMED):**
+  - When plan-module `.c` files exist (root under `.slake-native/<ModRel>.c` from A19, or A30-folded path-dep under package-cwd-relative `dep/.slake-native/…` / A29 sibling `../dep/.slake-native/…` from A31), **NATIVE_GRAPH** lists distinct `c_source <Mod> <relpath>` lines (soft-omit missing `.c`; olean module lines + A34 `object` lines stay stable).
+  - **NATIVE_SEAL** lists `module <Mod> c_hash <16-hex>` (FNV-1a 64 of C file bytes via the same `fnv1a64Bytes` helper; soft-omit missing/unreadable; do **not** fail seal solely for zero C sources).
+  - Fold optional sorted `c_hash` module lines into the **seal digest** after sorted `olean_hash` and before sorted `obj_hash` (stable order: package + olean_hash + c_hash + obj_hash + optional graph_hash + optional products).
+  - A35 headers/banners only when ≥1 c_source/c_hash line is actually written (cN > 0 style like A32/A34).
+  - systems_shaped without NATIVE_C: no c_source/c_hash lines (A14/A15 regression). systems_shaped with NATIVE_C (or NATIVE_OBJ which implies C): root Core/Host c_source + c_hash.
+  - Smoke: `native_c_graph_seal_smoke.sh` (STRICT via `SLAKE_NATIVE_C_GRAPH_SEAL_SMOKE_STRICT=1`) — systems_shaped C+GRAPH+SEAL; require_path_shaped path-dep Dep.c; sibling `../dep/.slake-native/Dep.c`; nested Foo.Bar; olean-only negative; help/env honesty.
+  - Honesty: **freestanding-adjacent plan-module C source inventory in NATIVE_GRAPH + NATIVE_SEAL subset** — **not** freestanding build TCB / **not** Lake lean_lib facet / **not** CLAIMED / **not** every dep plan module / **not** changing C emit semantics / **not** git/url / **not** multi-`..`.
+- **CLAIMED stays** `(build clean env test)` — not expanded; plan/native-check/native-olean/native-build/native-c/native-obj/native-irlink/native-ar/native-exe/native-link/native-graph/native-seal/per-lib roots/globs/multi-line arrays/path requires/sibling confining path/path-dep cascade/path-dep deps-hash fold/path-dep graph+seal nodes/plan-module object inventory/plan-module C source inventory are not freestanding build TCB; A17+A33 grow clean **behavior** only.
+- Living claim surfaces: `CLI.lean` / `Config.lean` / `README.md` / `doc/dev/slake.md` / `tests/slake/README.md` / driver lakefile docs.
+- **Prior A1 (still staged):** CLAIMED `test` + basic_toml test driver + living honesty for test token.
+- **H5 left alone** this slice (no forge of `GC_FREE_ELABORATOR`).
+
+**Honesty limits:**
+- Package plan = Config subset + **import-scan DAG subset** among plan nodes when edges exist, else declaration-order chain — **not** full Lake import resolution / module faceting / transitive lake packages / freestanding compile TCB.
+- Module paths = **package/per-lib srcDir + dotted-name subset** (A6 package `srcDir` + A16 per-lib `srcDir`/`roots` + A24/A25 globs ownership prefix match; not full Lake Glob, not lake package imports, not full Lake faceting).
+- A18 multi-line arrays = **double-quoted string lists** for `defaultTargets` / per-lib `roots` / per-lib `globs` (line-join until `]`; not full TOML multi-line tables / nested values / full faceted globs).
+- A24/A25 globs = **ones + `.+` / `.*` recursive multi-level confining walk** under srcDir (depth-bounded: 16 dir levels / 16 name segments; lstat refuse dir/file symlinks) — not full Lake Glob.matches / package imports / freestanding build TCB / CLAIMED. Roots still win when non-empty.
+- Import-scan is a line-oriented subset: keyword+whitespace prefixes (`public`/`meta`/`all`), multi-line block-comment open/close tracking, unique edges only; still not a full Lean parser (nested block comments / same-line code+comment mixes residual).
+- Node cap **1…16** on both freestanding and host plan paths; import-scan Kahn failure (cycle / degree overflow / bounds) is **fail-closed exit 1** on both (no silent chain fallback when edges were present).
+- A7 native check = sequential host `lean` on resolved plan modules only; multi-module sibling imports need oleans (A8).
+- A8 native olean = sequential host `lean -o` into package-local `.slake-native/` + LEAN_PATH feed among plan modules only — not Lake build graph, not freestanding build TCB.
+- A9 cache = **mtime(source) + this-run recompiled/soft-skip cascade + dep-olean-newer-than-self among plan nodes only** — not Lake shake TCB, not transitive lake package deps, not freestanding build TCB.
+- A10 hash = **FNV-1a 64 of source file bytes only** (sidecar next to olean) — not Lake shake TCB, not freestanding build TCB.
+- A10 NATIVE_BUILD = native olean compile then skip lake (JOBS applies; with NATIVE_C also requires C emit success; with NATIVE_OBJ also requires object compile success; with NATIVE_IRLINK also requires IR link success; with NATIVE_AR also requires static archive success; with NATIVE_EXE also requires executable link success; with NATIVE_LINK also requires link success; with NATIVE_GRAPH also requires graph write; with NATIVE_SEAL also requires seal write) — freestanding-adjacent package compile path, **not** freestanding build TCB / **not** CLAIMED.
+- A11 deps-hash = **direct plan-import edges among plan nodes** (+ **A28** path-dep import source-hash fold into the same frozen `deps` line when path requires present; live start-of-run dep hash-fresh for plan nodes only + skip-heal; cascade multi-hop) — not Lake package-transitive hash, not freestanding build TCB, not CLAIMED.
+- A12 parallel JOBS = **ready-set host-lean olean waves** among plan modules only — not Lake job server TCB, not freestanding build TCB, not CLAIMED, not shared-lib link. Empty import-scan edges ⇒ plan-order batches of N only (no import-edge ready-set gating).
+- A13 NATIVE_LINK = **host cc shared-lib** exporting plan module name table under `.slake-native/` — not Lake lean_lib shared-object of Lean IR, not freestanding build TCB, not Lake shared-lib TCB, not CLAIMED.
+- A14 NATIVE_GRAPH = **host package link graph artifact** under `.slake-native/slake_native_graph` (plan modules with oleans + A5 edges + optional shared_lib / optional shared_lib_ir / optional static_lib / optional executable) — not freestanding build TCB, not Lake build graph TCB, not Lake lean_lib SO, not CLAIMED.
+- A15 NATIVE_SEAL = **host freestanding-adjacent product seal artifact** under `.slake-native/slake_native_seal` (module olean_hash + optional graph_hash + optional shared_lib / optional shared_lib_ir / optional static_lib / optional executable + seal digest) — not freestanding build TCB, not Lake lean_lib SO, not Lake build graph TCB, not CLAIMED.
+- A16 per-lib roots/srcDir = **host TOML subset** for plan expansion + path resolve only — not full Lake LeanLibConfig / full Glob / facets / package imports / freestanding build TCB / CLAIMED.
+- A17 clean = **native product out dir wipe subset** (`.lake/build` + `.slake-native`) with symlink fence — not full Lake clean set, not freestanding build TCB, not CLAIMED token expansion. **A33** extends wipe to path-require package `.slake-native/` (A26 under-pkg / A29 sibling confining; identity order; soft missing OK) — not git/url / not Lake resolve-deps / not multi-`..` / not dep `.lake/build`.
+- A18 multi-line roots/defaultTargets/globs = **quoted string array join subset** — not full TOML, not Lake LeanLibConfig / full Glob / package imports, not freestanding build TCB, not CLAIMED.
+- A24/A25 per-lib globs = **plan expansion recursive multi-level subset** (ones + depth-bounded `.+`/`.*` dir walk) — not full Lake Glob / faceting / package imports / freestanding build TCB / CLAIMED.
+- A19 NATIVE_C = **host lean C-output emit** under `.slake-native/<ModRel>.c` (same LEAN_PATH as olean; sequential `lean -c`) — not freestanding build TCB, not Lake lean_lib SO of compiled Lean IR, not object compile+link of Lean runtime, not CLAIMED.
+- A20 NATIVE_OBJ = **host object compile of lean C** under `.slake-native/<ModRel>.o` (`cc -c -fPIC -I<leanInclude>`; implies NATIVE_C; sequential) — not freestanding build TCB, not Lake lean_lib SO of compiled Lean IR, not linking Lean runtime into SO, not IR link of `.o` (A13 remains name-table SO; A21 is the IR link path), not CLAIMED.
+- A21 NATIVE_IRLINK = **host leanc IR shared-lib link** of plan-module objects + Lean runtime via leanc under `.slake-native/libslake_ir.so` (`leanc -shared`; implies NATIVE_OBJ + NATIVE_C) — not freestanding build TCB, not Lake lean_lib shared-object TCB, not CLAIMED, not full Lake shared facet; A13 remains separate name-table SO (`libslake_native.so`).
+- A22 NATIVE_AR = **host static archive of plan-module objects** via `ar rcs` under `.slake-native/libslake_ir.a` (implies NATIVE_OBJ + NATIVE_C; does **not** imply IRLINK) — not freestanding build TCB, not Lake lean_lib static/shared facet, not CLAIMED, not linking Lean runtime into the archive (plain ar of module `.o` only); A13 remains name-table SO; A21 remains leanc IR SO.
+- A23 NATIVE_EXE = **host leanc executable link** of plan-module objects + stub main + Lean runtime via leanc under `.slake-native/slake_ir` (`leanc -o` + generated stub main; implies NATIVE_OBJ + NATIVE_C; does **not** imply IRLINK or AR) — not freestanding build TCB, not Lake lean_exe, not CLAIMED, not a real application entry from lakefile; A13 remains name-table SO; A21 remains leanc IR SO; A22 remains static archive.
+- PLAN_ONLY skips lake (after optional native check/olean/c-emit/obj/irlink/ar/exe/link/graph/seal); NATIVE_BUILD skips lake after successful olean (+ C emit when NATIVE_C/OBJ/IRLINK/AR/EXE set) (+ object compile when NATIVE_OBJ/IRLINK/AR/EXE set) (+ IR link when NATIVE_IRLINK set) (+ static archive when NATIVE_AR set) (+ executable link when NATIVE_EXE set) (+ name-table link when NATIVE_LINK set) (+ graph when NATIVE_GRAPH set) (+ seal when NATIVE_SEAL set); NATIVE_OLEAN/CHECK/C/OBJ/IRLINK/AR/EXE/LINK/GRAPH/SEAL without PLAN_ONLY/NATIVE_BUILD still lake-delegates after the thin step; CLAIMED package build still lake-delegated.
+- A26 path `[[require]]` = **safe relative path** (no absolute; no `..` except A29) + real-directory lstat fence (refuse symlink/file/missing) + LEAN_PATH feed + path-dep olean precompile depth ≤4 (single walker; one hop → depth−1) + require identity cap 16 (`require-cap=16` when truncated; fail-closed under STRICT/NATIVE_BUILD) — **not** git/url require / **not** Lake resolve-deps / **not** freestanding build TCB / **not** CLAIMED (A30 folds imported path-dep plan modules into root plan).
+- A27 path-dep → root cascade = **path-dep-olean-newer** on consumer imports of path-dep plan modules (after A26 precompile) — **not** git/url / **not** Lake resolve-deps / **not** Lake shake TCB / **not** freestanding build TCB / **not** CLAIMED.
+- A28 path-dep deps-hash fold = **path-dep import source hashes into A11 `deps <hex>`** (consumer import-scan + path-dep inventory; same deps-line-stale gate) — **not** git/url / **not** Lake resolve-deps / **not** Lake package-transitive hash / **not** freestanding build TCB / **not** CLAIMED.
+- A29 sibling confining `../path` = **exactly one leading `..` + ≥1 safe components** resolved under **package parent** (`pkg.parent / rest`) + same A26 real-dir lstat fence — **not** multi-`..` escape / **not** bare `..` / **not** mid-path `..` / **not** absolute / **not** workspace multi-level walk-up / **not** git/url / **not** Lake resolve-deps / **not** freestanding build TCB / **not** CLAIMED.
+- A30 package-transitive plan subset = **import-driven fold** of path-dep plan module names into root plan when root plan modules import them (first-seen order; cap 1…16 fail-closed under STRICT/NATIVE_BUILD when truncated; path-dep olean still under path-require package; root wave skips **A30-folded** path-dep plan nodes only; package-local-first resolve when source exists; A9 probes path-dep oleans for plan-import deps) — **not** Lake resolve-deps / **not** git/url / **not** every dep plan module unconditionally / **not** freestanding build TCB / **not** CLAIMED / **not** full Lake package-transitive hash.
+- A31 path-dep plan-module C/OBJ into IR products = **A30-folded path-dep modules only** emit C/OBJ under `dep/.slake-native/` and feed those `.o` into `libslake_ir.so` / `libslake_ir.a` / `slake_ir` (topo order; soft-skip unless STRICT/NATIVE_BUILD) — **not** Lake lean_lib shared/static/exe facet / **not** freestanding build TCB / **not** CLAIMED / **not** every dep plan module / **not** git/url / **not** multi-`..`.
+- A32 path-dep plan-module nodes in NATIVE_GRAPH + NATIVE_SEAL = **A30-folded path-dep modules only** list package-cwd-relative olean paths in graph (under-pkg `dep/…` or A29 sibling `../dep/…`) and path-dep olean_hash in seal (soft omit+warn when path-dep olean missing; STRICT/NATIVE_BUILD empty-product fail-closed like A14/A15) — **not** freestanding build TCB / **not** Lake build graph TCB / **not** Lake resolve-deps / **not** CLAIMED / **not** every dep plan module / **not** git/url / **not** multi-`..`.
+- A33 path-require package `.slake-native` wipe on clean = **A26/A29 pathRequires only** (after root A17 wipe; identity order; real-dir fence on dep package; A17 symlink fence on dep `.slake-native`; soft missing OK; FS_PROC/PIPE same set) — **not** git/url / **not** Lake resolve-deps clean of every workspace package / **not** multi-`..` / **not** dep `.lake/build` / **not** freestanding build TCB / **not** CLAIMED token expansion.
+- A34 plan-module object inventory in NATIVE_GRAPH + NATIVE_SEAL = **regular-file plan-module `.o` only** (root or A30-folded path-dep; package-cwd-relative `object` lines in graph; `obj_hash` FNV-1a 64 of object bytes in seal; soft-omit missing; banners only when ≥1 line written; olean-only GRAPH/SEAL unchanged) — **not** freestanding build TCB / **not** Lake lean_lib facet / **not** CLAIMED / **not** every dep plan module / **not** name-table SO / **not** changing IR link semantics.
+- A35 plan-module C source inventory in NATIVE_GRAPH + NATIVE_SEAL = **regular-file plan-module `.c` only** (root or A30-folded path-dep; package-cwd-relative `c_source` lines in graph; `c_hash` FNV-1a 64 of C file bytes in seal; soft-omit missing; banners only when ≥1 line written; seal digest folds sorted c_hash after olean_hash before obj_hash; olean-only GRAPH/SEAL unchanged) — **not** freestanding build TCB / **not** Lake lean_lib facet / **not** CLAIMED / **not** every dep plan module / **not** changing C emit semantics.
+- Dual residual: freestanding product cores `PRODUCT_GC_FREE=1`; classic host elaborator `GC_FREE_ELABORATOR=0`.
+
+**Do not default residual work to:**
+- TomlConfig `has*` key trios / honesty-only presence waves
+- Living-doc churn that does not grow freestanding product or real CLAIMED parity
+- Bulk renames of any kind (never)
+- Forging `GC_FREE_ELABORATOR` / host elaborator residual_free
+
+**Highest value next (priority order):**
+1. Deeper freestanding compile / build TCB beyond A15–A35 (real freestanding build path / full Lake lean_lib shared facet / fuller freestanding-adjacent TCB) — still not CLAIMED expansion without TDD; A21 is host `leanc -shared` of plan-module `.o` + runtime only; A22 is host `ar rcs` of plan-module `.o` only; A23 is host `leanc -o` of plan-module `.o` + stub main + runtime only; A24/A25 globs recursive multi-level subset only; A26 path `[[require]]` LEAN_PATH + path-dep olean precompile only; A27 path-dep → root olean cascade only; A28 path-dep source-hash fold into A11 deps-line only; A29 sibling confining `../path` under package-parent only; A30 import-driven package-transitive plan subset only; A31 path-dep plan-module C/OBJ into IR products only; A32 path-dep plan-module nodes in NATIVE_GRAPH + NATIVE_SEAL only; A33 path-require package `.slake-native` wipe on clean only; A34 plan-module object inventory in NATIVE_GRAPH + NATIVE_SEAL only; A35 plan-module C source inventory in NATIVE_GRAPH + NATIVE_SEAL only (not git/url / not Lake resolve-deps / not multi-`..` workspace walk-up / not every dep plan module / not full Lake lean_lib facet)
+2. Deeper import residual after A16/A18/A24/A25/A26/A27/A28/A29/A30/A31/A32/A33/A34/A35: git/url `[[require]]`, multi-`..` / workspace confining root beyond package-parent, fuller Lake LeanLibConfig / full Glob.matches / facets / full Lake package-transitive resolve-deps
+3. **CLAIMED growth** only with TDD + green `run_parity` (prefer not expanding without package story)
+4. **H5** elaborator residual experiment only with **measured** evidence — never forge `GC_FREE_ELABORATOR`
+
+**Validate (scripts):**
+```bash
+# driver
+cd tests/slake/driver && lake build
+
+# full CLAIMED parity (build clean env test + identity greps)
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  ./tests/slake/parity/run_parity.sh
+
+# A3 package plan + PLAN_ONLY
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_DEPGRAPH_SMOKE_STRICT=1 ./tests/slake/depgraph_cli_smoke.sh
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_PLAN_ONLY_SMOKE_STRICT=1 ./tests/slake/plan_only_smoke.sh
+
+# A4 systems-shaped dogfood
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_SYSTEMS_PLAN_SMOKE_STRICT=1 ./tests/slake/systems_plan_smoke.sh
+
+# A5 import-scan DAG
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_IMPORT_DAG_SMOKE_STRICT=1 ./tests/slake/import_dag_smoke.sh
+
+# A6 srcDir / nested path resolution
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_SRCDIR_PLAN_SMOKE_STRICT=1 ./tests/slake/srcdir_plan_smoke.sh
+
+# A7 thin sequential host-lean typecheck
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_CHECK_SMOKE_STRICT=1 ./tests/slake/native_check_smoke.sh
+
+# A8 multi-module sequential host-lean + olean LEAN_PATH
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_OLEAN_SMOKE_STRICT=1 ./tests/slake/native_olean_smoke.sh
+
+# A9 mtime + plan-edge cascade cache invalidation
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_OLEAN_CACHE_SMOKE_STRICT=1 ./tests/slake/native_olean_cache_smoke.sh
+
+# A10 FNV-1a 64 source content-hash sidecar
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_OLEAN_HASH_SMOKE_STRICT=1 ./tests/slake/native_olean_hash_smoke.sh
+
+# A10 NATIVE_BUILD freestanding-adjacent skip-lake path
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_BUILD_SMOKE_STRICT=1 ./tests/slake/native_build_smoke.sh
+
+# A11 plan-node transitive deps-hash
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_OLEAN_DEPS_HASH_SMOKE_STRICT=1 ./tests/slake/native_olean_deps_hash_smoke.sh
+
+# A12 parallel native olean JOBS ready-set waves
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_OLEAN_PARALLEL_SMOKE_STRICT=1 ./tests/slake/native_olean_parallel_smoke.sh
+
+# A13 host shared-lib link subset after native oleans
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_LINK_SMOKE_STRICT=1 ./tests/slake/native_link_smoke.sh
+
+# A14 host package link graph subset after native oleans
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_GRAPH_SMOKE_STRICT=1 ./tests/slake/native_graph_smoke.sh
+
+# A15 host freestanding-adjacent product seal subset after native oleans
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_SEAL_SMOKE_STRICT=1 ./tests/slake/native_seal_smoke.sh
+
+# A16 per-lib roots + srcDir plan residual
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_ROOTS_PLAN_SMOKE_STRICT=1 ./tests/slake/roots_plan_smoke.sh
+
+# A18 multi-line roots / defaultTargets arrays
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_MULTILINE_ROOTS_PLAN_SMOKE_STRICT=1 ./tests/slake/multiline_roots_plan_smoke.sh
+
+# A19 host lean C-output emit subset after native oleans
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_C_SMOKE_STRICT=1 ./tests/slake/native_c_smoke.sh
+
+# A20 host object compile of lean C after native C emit
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_OBJ_SMOKE_STRICT=1 ./tests/slake/native_obj_smoke.sh
+
+# A21 host leanc IR shared-lib link of plan-module objects + Lean runtime
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_IRLINK_SMOKE_STRICT=1 ./tests/slake/native_irlink_smoke.sh
+
+# A22 host static archive of plan-module objects via ar rcs
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_AR_SMOKE_STRICT=1 ./tests/slake/native_ar_smoke.sh
+
+# A23 host leanc executable link of plan-module objects + stub main + Lean runtime
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_EXE_SMOKE_STRICT=1 ./tests/slake/native_exe_smoke.sh
+
+# A24/A25 per-lib globs recursive multi-level subset for plan expansion
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_GLOBS_PLAN_SMOKE_STRICT=1 ./tests/slake/globs_plan_smoke.sh
+
+# A26 path [[require]] LEAN_PATH + path-dep olean precompile subset
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_REQUIRE_PATH_SMOKE_STRICT=1 ./tests/slake/require_path_smoke.sh
+
+# A27 path-dep → root olean cascade (path-dep-olean-newer)
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_REQUIRE_PATH_CASCADE_SMOKE_STRICT=1 ./tests/slake/require_path_cascade_smoke.sh
+
+# A28 path-dep source-hash fold into A11 deps-line
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_REQUIRE_PATH_DEPS_HASH_SMOKE_STRICT=1 ./tests/slake/require_path_deps_hash_smoke.sh
+
+# A29 sibling confining path [[require]] (../dep under package-parent)
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_REQUIRE_SIBLING_SMOKE_STRICT=1 ./tests/slake/require_sibling_smoke.sh
+
+# A30 package-transitive plan subset (import-driven)
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_REQUIRE_TRANSITIVE_PLAN_SMOKE_STRICT=1 ./tests/slake/require_transitive_plan_smoke.sh
+
+# A31 path-dep plan-module C/OBJ into IR products
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_PATHDEP_IR_SMOKE_STRICT=1 ./tests/slake/native_pathdep_ir_smoke.sh
+
+# A32 path-dep plan-module nodes in NATIVE_GRAPH + NATIVE_SEAL
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_PATHDEP_GRAPH_SEAL_SMOKE_STRICT=1 ./tests/slake/native_pathdep_graph_seal_smoke.sh
+
+# A33 path-require package .slake-native wipe on clean
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_PATHDEP_CLEAN_SMOKE_STRICT=1 ./tests/slake/native_pathdep_clean_smoke.sh
+
+# A34 plan-module object inventory in NATIVE_GRAPH + NATIVE_SEAL
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_OBJ_GRAPH_SEAL_SMOKE_STRICT=1 ./tests/slake/native_obj_graph_seal_smoke.sh
+
+# A35 plan-module C source inventory in NATIVE_GRAPH + NATIVE_SEAL
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_C_GRAPH_SEAL_SMOKE_STRICT=1 ./tests/slake/native_c_graph_seal_smoke.sh
+
+# A17 clean native product out dir wipe (.slake-native + .lake/build)
+SLAKE_BIN="$PWD/tests/slake/driver/.lake/build/bin/slake" \
+  SLAKE_NATIVE_CLEAN_SMOKE_STRICT=1 ./tests/slake/native_clean_smoke.sh
+
+# dual residual honesty scoreboard (do not forge elaborator)
+# script/systems-status.sh
+```
+
+**Next implement prompt skeleton:**
+```
+Implement next residual (prefer deeper freestanding build TCB beyond A15–A35 — real freestanding build / full Lake lean_lib shared facet / deeper package imports: git/url require / multi-.. workspace confining / fuller LeanLibConfig over TomlConfig has*).
+Constraints: never bulk rename; never forge GC_FREE_ELABORATOR;
+CLAIMED is (build clean env test) — do not expand beyond one real slice without TDD;
+stage only (GPG commit is human).
+Verify with run_parity.sh + depgraph/plan_only/systems_plan/import_dag/srcdir_plan/native_check/native_olean/native_olean_cache/native_olean_hash/native_build/native_olean_deps_hash/native_olean_parallel/native_link/native_graph/native_seal/native_c/native_obj/native_irlink/native_ar/native_exe/roots_plan/multiline_roots_plan/globs_plan/require_path/require_path_cascade/require_path_deps_hash/require_sibling/require_transitive_plan/native_pathdep_ir/native_pathdep_graph_seal/native_pathdep_clean/native_obj_graph_seal/native_c_graph_seal/native_clean smokes; update RESIDUAL product-first top.
+```
+
+**Out of scope defaults (still open elsewhere, not the default next slice):**
+- More TomlConfig presence-only keys
+- Freestanding TomlConfig FFI into classic CLI
+- Expanding CLAIMED beyond the current harness without a green parity package story
+- Forging elaborator residual / H5 without measured evidence
+- Claiming freestanding build TCB or lake-equivalent olean orchestration / shake/hash / Lake job server / Lake shared-lib / Lake build graph / freestanding TCB from A8–A35 multi-module host-lean + mtime/hash/deps-hash cascade + ready-set JOBS + host lean C emit + host object compile of lean C + host leanc IR shared-lib link + host static archive + host leanc executable link + host name-table shared-lib link + package link graph + product seal + per-lib roots + multi-line arrays + recursive multi-level globs + path [[require]] LEAN_PATH/path-dep olean precompile + path-dep → root cascade + path-dep source-hash fold into A11 deps-line + sibling confining ../path + package-transitive plan subset + path-dep C/OBJ IR + path-dep graph/seal nodes + path-require clean wipe + plan-module object inventory + plan-module C source inventory alone
+
+
+---
+
+**Updated:** 2026-07-21 
 **After wave:** W153 residual-green — H5 honesty (still classic_RC_shared; `GC_FREE_ELABORATOR=0` measured, not forged) + TomlConfig more88 (`hasLinters`/`hasBuiltinLintCli`/`hasLinter` presence-only; Lake greppable long-option stems `linters` + `builtin-lint` + greppable identity `linter` — `CLI/Main.lean` `| "--linters" =>` / `| "--builtin-lint" =>` / `parseLintersSpec` `"linter" ++ s`; key string **without** leading `--` (same convention as more87 `trace` / more86 `force` / more85 `wfail`); **not** Version parse labels; **exact length-7** `linters` (distinct from more64 exact len-4 `lint` / `hasLint` and from trio exact len-6 `linter` / `hasLinter`); **exact length-12** `builtin-lint` (`hasBuiltinLintCli` — `*Cli` like more74 `hasVersionTagsCli`; content-distinct from more20 camel `builtinLint` len-11 / `hasBuiltinLint` and from more80 exact len-12 `builtin-only` / `hasBuiltinOnly`); **exact length-6** `linter` (prefix of `linters` — exact-len only; distinct from more64 `lint` / more80 `lint-only`); reverse peers linters↔hasLinter / builtin-lint↔hasBuiltinLint/hasBuiltinOnly and each other and trio among linters↔builtin-lint↔linter (lint residual closeout); after more87 trace/old/json; pure free long-option stems empty after more88) + Slake_parity_more honesty-only (classic-only FS_PROC void for wired Lake cmds is **empty**; CLAIMED stays `(build clean env)` — residual is harness/parity work, not more FS_PROC wiring; **no** new `slake_fs_run_lake_*`). **No Track L** packing (modules +0; FS_READY **149→149**). Earn still open (host still classic RC). Dual residual honesty: freestanding product cores `PRODUCT_GC_FREE=1`; classic host elaborator `GC_FREE_ELABORATOR=0` (classic_RC_shared). PRODUCT_FS_NEXT → `H5_host,TomlConfig_more89,Slake_parity_more` (next after more88; more89+ other Lake greppable identity/JSON-insert/tryDecode keys — no free CLI long-option stems left; CLAIMED residual only). SCORE last-known fail=0; full validate not re-run this wave — honesty. **Do not re-run** W153@149 (no Track L growth); W152@149; W151@149; W150@149; W149@149; W148@149; W147@149; W146@149; W145@149; W144@149; W143@149; W142@149; W141@149; W140@149; W139@149; W138@149; W137@149; W136@149; W135@149; W134@149; W133@149; W132@149; W131@149; W130@149; W129@149; W128@149; W127@149; W126@149; W125@149; W124@149; W123@149; W122@149; W121@149; W120@149; W119@149; W118@149; W117@149; W116@149; W115@149; W114@149; W113@149; E@149; D21…D1; C@149; B3@187; B2@256; B1@301.
 **Prior wave:** W152 residual-green — H5 honesty (still classic_RC_shared; `GC_FREE_ELABORATOR=0` measured, not forged) + TomlConfig more87 (`hasTrace`/`hasOld`/`hasJson` presence-only; Lake greppable long-option stems `trace` + `old` + `json` — `CLI/Main.lean` `| "--trace" =>` / `| "--old" =>` / `| "--json" =>` (shake residual + outFormat residual); key string **without** leading `--` (same convention as more86 `force` / more85 `wfail` / more84 `offline`); **not** Version parse labels; **exact length-5** `trace` (distinct from more56 exact len-9 `traceArgs` / `hasTraceArgs`); **exact length-3** `old`; **exact length-4** `json` (distinct from more36 exact len-4 `text` / `hasText` outFormat peer); reverse peers trace↔hasTraceArgs / json↔hasText and each other and trio among trace↔old↔json (shake residual cluster); after more86 force/fix/only) + Slake_parity_more honesty-only (classic-only FS_PROC void for wired Lake cmds is **empty**; CLAIMED stays `(build clean env)` — residual is harness/parity work, not more FS_PROC wiring; **no** new `slake_fs_run_lake_*`). **No Track L** packing (modules +0; FS_READY **149→149**). Earn still open (host still classic RC). Dual residual honesty: freestanding product cores `PRODUCT_GC_FREE=1`; classic host elaborator `GC_FREE_ELABORATOR=0` (classic_RC_shared). PRODUCT_FS_NEXT → `H5_host,TomlConfig_more88,Slake_parity_more` (next after more87; more88 pins free Lake stem `linters`; CLAIMED residual only). SCORE last-known fail=0; full validate not re-run this wave — honesty. **Do not re-run** W152@149 (no Track L growth); W151@149; W150@149; W149@149; W148@149; W147@149; W146@149; W145@149; W144@149; W143@149; W142@149; W141@149; W140@149; W139@149; W138@149; W137@149; W136@149; W135@149; W134@149; W133@149; W132@149; W131@149; W130@149; W129@149; W128@149; W127@149; W126@149; W125@149; W124@149; W123@149; W122@149; W121@149; W120@149; W119@149; W118@149; W117@149; W116@149; W115@149; W114@149; W113@149; E@149; D21…D1; C@149; B3@187; B2@256; B1@301.
 **Superseded by W153.**

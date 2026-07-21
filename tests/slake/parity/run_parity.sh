@@ -6,7 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 PKG="$ROOT/basic_toml"
-CLAIMED=(build clean env)
+CLAIMED=(build clean env test)
 
 # W85: remaining-argv plumbing smoke (soft SKIP if no lake; always-on when lake present).
 # Outside CLAIMED — verifies classic-host forwards pass extra tokens to lake.
@@ -93,6 +93,8 @@ echo "== lake parity reference on $PKG =="
   # clean first so build is meaningful when artifacts exist
   lake clean || true
   lake build
+  # CLAIMED test: package must have a test driver that exits 0
+  lake test
   lake clean
 )
 
@@ -149,6 +151,12 @@ ${out_build}"
       printf '%s\n' "$out_build"
       exit 1
     fi
+    # Host TOML identity banner on CLAIMED build
+    if ! printf '%s' "$out_build" | grep -Fq 'name=basic_toml'; then
+      echo "FAIL: slake build missing package name identity (name=basic_toml)"
+      printf '%s\n' "$out_build"
+      exit 1
+    fi
     if is_stub_output "$combined"; then
       echo "OK: slake stub dispatch only (${CLAIMED[*]}; not Lake parity; no artifact check)"
       echo "     classic host stubs under src/slake/; freestanding cores stay in Systems.*"
@@ -160,6 +168,27 @@ ${out_build}"
       printf '%s\n' "$out_build"
       exit 1
     fi
+
+    # CLAIMED test: real driver delegates to lake test; require exit 0 (not stub)
+    # and golden driver banner so a no-op lake test cannot silently pass.
+    out_test="$("$SLAKE_EXE" test 2>&1)"
+    rc_test=$?
+    if [[ "$rc_test" -ne 0 ]]; then
+      echo "FAIL: slake test exited $rc_test"
+      printf '%s\n' "$out_test"
+      exit 1
+    fi
+    if is_stub_output "$out_test"; then
+      echo "FAIL: slake test looked like stub after non-stub build"
+      printf '%s\n' "$out_test"
+      exit 1
+    fi
+    if ! printf '%s' "$out_test" | grep -Fq 'basic_toml: test ok'; then
+      echo "FAIL: slake test missing golden driver banner (basic_toml: test ok)"
+      printf '%s\n' "$out_test"
+      exit 1
+    fi
+
     out_clean2="$("$SLAKE_EXE" clean 2>&1)"
     rc_clean2=$?
     if [[ "$rc_clean2" -ne 0 ]]; then
@@ -177,6 +206,34 @@ ${out_build}"
       printf '%s\n' "$out_clean2"
       exit 1
     fi
+
+    # A17: clean also wipes package-local .slake-native (native product out dir subset)
+    mkdir -p .slake-native
+    printf 'marker\n' > .slake-native/marker
+    # also ensure .lake/build can exist or not; clean should remove .slake-native either way
+    out_clean3="$("$SLAKE_EXE" clean 2>&1)"
+    rc_clean3=$?
+    if [[ "$rc_clean3" -ne 0 ]]; then
+      echo "FAIL: slake clean (A17 .slake-native) exited $rc_clean3"
+      printf '%s\n' "$out_clean3"
+      exit 1
+    fi
+    if [[ -d .slake-native ]]; then
+      echo "FAIL: slake clean left .slake-native under $PKG"
+      printf '%s\n' "$out_clean3"
+      exit 1
+    fi
+    if [[ -d .lake/build ]]; then
+      echo "FAIL: slake clean left .lake/build under $PKG after A17 band"
+      printf '%s\n' "$out_clean3"
+      exit 1
+    fi
+    if ! printf '%s' "$out_clean3" | grep -Fq '.slake-native'; then
+      echo "FAIL: slake clean A17 band missing .slake-native in output"
+      printf '%s\n' "$out_clean3"
+      exit 1
+    fi
+    echo "OK: slake clean wiped .slake-native (A17 native product out dir subset)"
 
     # Safety: from tests/slake/parity (no local package), must not bind monorepo tests/
     (
@@ -230,22 +287,24 @@ ${out_build}"
     ) || exit 1
 
     # Non-CLAIMED help lock (W84 exec/upgrade + W83 query-kind/resolve-deps/reservoir-config + W82 setup-file/self-check/version-tags + W81 translate-config/run + W80 serve/upload).
-    # Does not expand CLAIMED=(build clean env). In-tree driver (tests/slake/driver) hard-fails if
+    # Does not expand CLAIMED beyond the harness list above. In-tree driver (tests/slake/driver) hard-fails if
     # W80–W84 tokens missing; external/older SLAKE_EXE soft-WARNs only.
     # Residual (same as W80–W82): help-token lock only — no dedicated package-root dispatch smoke for thin forwards.
     help_out="$("$SLAKE_EXE" --help 2>&1 || true)"
-    if printf '%s' "$help_out" | grep -Eq 'serve' \
-        && printf '%s' "$help_out" | grep -Eq 'upload' \
-        && printf '%s' "$help_out" | grep -Eq 'translate-config' \
-        && printf '%s' "$help_out" | grep -Eq '  run         ' \
-        && printf '%s' "$help_out" | grep -Eq 'setup-file' \
-        && printf '%s' "$help_out" | grep -Eq 'self-check' \
-        && printf '%s' "$help_out" | grep -Eq 'version-tags' \
-        && printf '%s' "$help_out" | grep -Eq 'query-kind' \
-        && printf '%s' "$help_out" | grep -Eq 'resolve-deps' \
-        && printf '%s' "$help_out" | grep -Eq 'reservoir-config' \
-        && printf '%s' "$help_out" | grep -Eq 'exec' \
-        && printf '%s' "$help_out" | grep -Eq 'upgrade'; then
+    # Use here-string (not printf|grep): under `set -o pipefail`, early-exit grep -q can
+    # SIGPIPE a still-writing printf and falsely fail the pipeline (flake on long --help).
+    if grep -Eq 'serve' <<<"$help_out" \
+        && grep -Eq 'upload' <<<"$help_out" \
+        && grep -Eq 'translate-config' <<<"$help_out" \
+        && grep -Eq '  run         ' <<<"$help_out" \
+        && grep -Eq 'setup-file' <<<"$help_out" \
+        && grep -Eq 'self-check' <<<"$help_out" \
+        && grep -Eq 'version-tags' <<<"$help_out" \
+        && grep -Eq 'query-kind' <<<"$help_out" \
+        && grep -Eq 'resolve-deps' <<<"$help_out" \
+        && grep -Eq 'reservoir-config' <<<"$help_out" \
+        && grep -Eq 'exec' <<<"$help_out" \
+        && grep -Eq 'upgrade' <<<"$help_out"; then
       echo "OK: slake --help lists serve/upload/translate-config/run/setup-file/self-check/version-tags/query-kind/resolve-deps/reservoir-config/exec/upgrade (outside CLAIMED)"
     else
       case "$SLAKE_EXE" in

@@ -39,7 +39,7 @@ if ! SLAKE_EXE="$(resolve_slake)"; then
 fi
 
 env_out="$("$SLAKE_EXE" env 2>&1)" || true
-if ! printf '%s' "$env_out" | grep -Fq "SLAKE_FS_PROC_PIPE_LINKED: 1"; then
+if ! grep -Fq "SLAKE_FS_PROC_PIPE_LINKED: 1" <<<"$env_out"; then
   if [[ "${SLAKE_FS_PROC_PIPE_SMOKE_STRICT:-}" == "1" ]]; then
     echo "FAIL: slake not linked with freestanding Proc pipe shim"
     printf '%s\n' "$env_out"

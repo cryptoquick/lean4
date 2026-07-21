@@ -39,7 +39,7 @@ fi
 
 # Require env to report FS_PROC linked (Option C link present).
 env_out="$("$SLAKE_EXE" env 2>&1)" || true
-if ! printf '%s' "$env_out" | grep -Fq "SLAKE_FS_PROC_LINKED: 1"; then
+if ! grep -Fq "SLAKE_FS_PROC_LINKED: 1" <<<"$env_out"; then
   echo "SKIP: slake not linked with freestanding Proc shim (rebuild driver after systems extract)"
   printf '%s\n' "$env_out"
   exit 0

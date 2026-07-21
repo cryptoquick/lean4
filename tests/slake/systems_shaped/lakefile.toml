@@ -1,0 +1,11 @@
+name = "systems_shaped"
+version = "0.1.0"
+# Declaration order deliberately lists Host before Core so pure chain topo would
+# emit Host first; Host.lean imports Core, so import-scan DAG places Core first.
+defaultTargets = ["Host", "Core"]
+
+[[lean_lib]]
+name = "Host"
+
+[[lean_lib]]
+name = "Core"

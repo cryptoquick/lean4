@@ -1,0 +1,10 @@
+name = "require_path_shaped"
+version = "0.1.0"
+defaultTargets = ["App"]
+
+[[require]]
+name = "dep"
+path = "dep"
+
+[[lean_lib]]
+name = "App"

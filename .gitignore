@@ -2,6 +2,9 @@
 \#*
 .#*
 .lake
+# A8 SLAKE_NATIVE_OLEAN package-local host-lean olean out dir (not Lake .lake/build;
+# not wiped by slake clean — residual honesty, not lake clean parity).
+.slake-native/
 lake-manifest.json
 /build
 /out

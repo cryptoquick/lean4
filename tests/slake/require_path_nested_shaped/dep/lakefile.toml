@@ -1,0 +1,6 @@
+name = "dep"
+version = "0.1.0"
+defaultTargets = ["Foo.Bar"]
+
+[[lean_lib]]
+name = "Foo.Bar"

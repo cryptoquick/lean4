@@ -1,0 +1,12 @@
+name = "multiline_roots_shaped"
+version = "0.1.0"
+# No defaultTargets — plan modules come from multi-line lean_lib roots (A18).
+# No package-level srcDir — modules resolve only via per-lib srcDir.
+
+[[lean_lib]]
+name = "Lib"
+srcDir = "lib"
+roots = [
+  "Alpha",
+  "Beta",
+]

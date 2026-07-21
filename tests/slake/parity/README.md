@@ -6,7 +6,7 @@ Golden trees for behavioral parity between **lake** (classic) and **slake** (Sys
 
 | Dir | Purpose |
 |-----|---------|
-| `basic_toml/` | Minimal TOML package: one lib root, no git deps |
+| `basic_toml/` | Minimal TOML package: one lib root, test driver exe, no git deps |
 
 ## Runner
 
@@ -24,4 +24,4 @@ Exit:
 - `0` — claimed checks green (lake+slake with artifacts, or slake SKIP if no binary)
 - non-zero — lake fail or slake fail when present
 
-See `run_parity.sh` for the claimed command list. Honest residual: classic host `slake` delegates `build` to `lake`; not freestanding TCB.
+See `run_parity.sh` for the claimed command list (`build` / `clean` / `env` / `test`). Honest residual: classic host `slake` delegates claimed `build`/`test` (and thin forwards) to `lake`; native `clean` is dual residual; not freestanding TCB.
